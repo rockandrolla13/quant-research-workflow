@@ -1,0 +1,20 @@
+data:
+  source: "Yahoo Finance"
+  frequency: "1d"
+  universe: "S&P 500 constituents"
+  train_start: "2010-01-01"
+  train_end: "2018-12-31"
+  validate_start: "2019-01-01"
+  validate_end: "2021-12-31"
+  holdout_start: "2022-01-01"
+  holdout_end: "2023-12-31"
+
+signal:
+  rsi_period: 14
+  oversold_threshold: 30
+  overbought_threshold: 70
+
+validation:
+  sharpe_ratio_threshold: 1.5
+  max_drawdown_threshold: 0.15
+  cagr_threshold: 0.1
