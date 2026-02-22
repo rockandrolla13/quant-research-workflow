@@ -1,0 +1,69 @@
+# spec.yaml — Single source of truth for strategy specification
+# Schema-first: this is the contract between synth/ and repo/
+# If SPEC.md conflicts with this file, this file wins.
+
+strategy_id: ""
+version: "0.1.0"
+status: draft  # draft | review | locked
+
+hypotheses:
+  h0: ""                            # null hypothesis
+  h1: ""                            # alternative hypothesis
+  test: ""                          # e.g. "two-sided t-test"
+  alpha: 0.05
+  effect_size: 0.0
+
+signal:
+  name: ""
+  formula_latex: ""
+  inputs:
+    # - name: ""
+    #   dtype: ""                   # float64 | int64 | str | bool | datetime
+    #   frequency: ""               # tick | 1m | 5m | 1d | 1w | 1mo
+    #   source: ""                  # e.g. CRSP, Yahoo, Binance
+  parameters:
+    # - name: ""
+    #   value: 0.0
+    #   tunable: true
+
+data_schema:
+  universe: ""                      # e.g. "S&P 500", "US large-cap equity"
+  columns:
+    # - name: ""
+    #   dtype: ""                   # float64 | int64 | str | bool | datetime
+    #   nullable: false
+  splits:
+    train:
+      start: null                   # YYYY-MM-DD
+      end: null
+    validate:
+      start: null
+      end: null
+    holdout:
+      start: null
+      end: null
+
+module_apis:
+  # - module: ""                    # e.g. "signals", "portfolio", "backtest"
+  #   functions:
+  #     - name: ""
+  #       args:
+  #         - name: ""
+  #           type: ""
+  #       returns: ""
+  #       description: ""
+
+test_plan:
+  unit_tests:
+    # - function: ""
+    #   cases:
+    #     - input: null
+    #       expected: null
+  property_tests:
+    # - invariant: ""
+
+success_criteria:
+  metrics:
+    # - name: ""                    # e.g. sharpe_ratio, cagr, max_drawdown
+    #   threshold: 0.0
+    #   direction: ">"              # ">" or "<"
