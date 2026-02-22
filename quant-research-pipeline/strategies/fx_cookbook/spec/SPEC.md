@@ -7,7 +7,7 @@
 | Field       | Value |
 |-------------|-------|
 | Strategy ID | fx_cookbook |
-| Version     | v1.0 |
+| Version     | v1.1 |
 | Status      | locked |
 
 ## Hypotheses
@@ -106,7 +106,15 @@ $$S_{i,t}^{\text{Carry}} = \frac{c_{i,t}}{\sigma_{r_{i,t}}}$$
 | Function | Args | Returns | Description |
 |----------|------|---------|-------------|
 | run_backtest | weights: DataFrame, returns: DataFrame, costs: DataFrame | DataFrame | T+1 execution backtest |
+| compute_pnl | weights: DataFrame, returns: DataFrame, cost_bps: float, bid_ask: DataFrame | DataFrame | Daily PnL with transaction cost deduction |
 | compute_metrics | backtest_results: DataFrame | dict | Sharpe, CAGR, max DD, Calmar, Sortino, turnover |
+
+### `validation`
+| Function | Args | Returns | Description |
+|----------|------|---------|-------------|
+| run_hypothesis_test | returns: Series, alpha: float, effect_size: float | dict | Two-sided t-test on annualised Sharpe vs 0 |
+| evaluate_success_criteria | metrics: dict, criteria: list[dict] | list[dict] | Check metrics against thresholds |
+| go_no_go | hypothesis_result: dict, criteria_results: list[dict] | dict | Combined GO/NO_GO verdict |
 
 ## Test Plan
 
@@ -115,12 +123,19 @@ $$S_{i,t}^{\text{Carry}} = \frac{c_{i,t}}{\sigma_{r_{i,t}}}$$
 - `compute_carry_signal`: positive carry → positive signal; negative carry → negative signal
 - `build_cs_weights`: beta-neutrality (Σ w·β ≈ 0); absolute sum = 1
 - `estimate_covariance`: identity returns → diagonal matrix; perfect correlation → ρ ≈ 1
+- `run_backtest`: zero-cost constant weights → gross = net; high turnover → net < gross
+- `compute_pnl`: zero costs → gross = net; nonzero costs → net < gross by cost amount
+- `compute_metrics`: positive returns → Sharpe > 0; drawdown scenario → max_dd ≈ 0.50
+- `run_hypothesis_test`: strong returns → reject H0; noise → fail to reject
+- `evaluate_success_criteria`: metrics above thresholds → all pass; below → all fail
+- `go_no_go`: H0 rejected + all pass → GO; H0 not rejected → NO_GO
 
 ### Property Tests
 - |Σ weights| = 1.0 at every rebalance (time-series)
 - Σ w·β ≈ 0 at every rebalance (cross-sectional)
 - No position exceeds max_position_pct
 - Raw momentum signal bounded in [-1, 1]
+- go_no_go returns GO only when reject_h0 = true AND all criteria pass
 
 ## Success Criteria
 

@@ -1,5 +1,5 @@
 strategy_id: fx_cookbook
-version: "v1.0"
+version: "v1.1"
 status: locked
 
 hypotheses:
@@ -195,12 +195,53 @@ module_apis:
             type: "pd.DataFrame"
         returns: "pd.DataFrame"
         description: "Run backtest with T+1 execution. Returns DataFrame with columns [date, gross_return, net_return, turnover, cumulative_return]."
+      - name: compute_pnl
+        args:
+          - name: weights
+            type: "pd.DataFrame"
+          - name: returns
+            type: "pd.DataFrame"
+          - name: cost_bps
+            type: float
+          - name: bid_ask
+            type: "pd.DataFrame"
+        returns: "pd.DataFrame"
+        description: "Compute daily PnL from weights and returns. Deducts transaction costs (cost_bps multiplied by turnover and bid-ask spreads). Returns DataFrame with columns [date, gross_pnl, cost, net_pnl, cumulative_net]."
       - name: compute_metrics
         args:
           - name: backtest_results
             type: "pd.DataFrame"
         returns: dict
         description: "Compute Sharpe, CAGR, max drawdown, Calmar, Sortino, avg turnover from backtest results."
+
+  - module: validation
+    functions:
+      - name: run_hypothesis_test
+        args:
+          - name: returns
+            type: "pd.Series"
+          - name: alpha
+            type: float
+          - name: effect_size
+            type: float
+        returns: dict
+        description: "Two-sided t-test on annualised Sharpe ratio vs 0. Returns dict with keys [t_stat, p_value, sharpe, reject_h0, n_obs]."
+      - name: evaluate_success_criteria
+        args:
+          - name: metrics
+            type: dict
+          - name: criteria
+            type: "list[dict]"
+        returns: "list[dict]"
+        description: "Check each metric against its threshold and direction from success_criteria. Returns list of dicts with keys [name, value, threshold, direction, pass]."
+      - name: go_no_go
+        args:
+          - name: hypothesis_result
+            type: dict
+          - name: criteria_results
+            type: "list[dict]"
+        returns: dict
+        description: "Combine hypothesis test and criteria evaluation into single verdict. Returns dict with keys [decision (GO/NO_GO), reasons, hypothesis_pass, criteria_all_pass]."
 
 test_plan:
   unit_tests:
@@ -228,11 +269,48 @@ test_plan:
           expected: "off-diagonal elements near zero, diagonal reflects asset volatilities"
         - input: {"returns": "perfectly_correlated_pair", "decay_diag": 252, "decay_offdiag": 756}
           expected: "correlation between pair ≈ 1.0"
+    - function: run_backtest
+      cases:
+        - input: {"weights": "constant_long_equal_weight", "returns": "constant_1pct_daily", "costs": "zero_costs"}
+          expected: "gross_return = net_return ≈ 1% daily, turnover = 0 after first day"
+        - input: {"weights": "daily_flipping_weights", "returns": "constant_1pct_daily", "costs": "10bps_spread"}
+          expected: "net_return < gross_return due to 100% daily turnover"
+    - function: compute_pnl
+      cases:
+        - input: {"weights": "static_weights", "returns": "known_returns", "cost_bps": 0.0, "bid_ask": "zero_spreads"}
+          expected: "gross_pnl = net_pnl, cumulative_net matches manual calculation"
+        - input: {"weights": "static_weights", "returns": "known_returns", "cost_bps": 10.0, "bid_ask": "uniform_spreads"}
+          expected: "net_pnl < gross_pnl by cost_bps * turnover * spread amount"
+    - function: compute_metrics
+      cases:
+        - input: {"backtest_results": "constant_positive_returns"}
+          expected: "Sharpe > 0, max_drawdown = 0, CAGR > 0"
+        - input: {"backtest_results": "50pct_drawdown_then_recovery"}
+          expected: "max_drawdown ≈ 0.50"
+    - function: run_hypothesis_test
+      cases:
+        - input: {"returns": "strong_positive_returns_10y", "alpha": 0.05, "effect_size": 0.4}
+          expected: "reject_h0 = true, sharpe > 0.4, p_value < 0.05"
+        - input: {"returns": "zero_mean_noise", "alpha": 0.05, "effect_size": 0.4}
+          expected: "reject_h0 = false, sharpe ≈ 0"
+    - function: evaluate_success_criteria
+      cases:
+        - input: {"metrics": {"sharpe": 0.6, "max_dd": 0.15}, "criteria": [{"name": "sharpe", "threshold": 0.4, "direction": ">"}, {"name": "max_dd", "threshold": 0.25, "direction": "<"}]}
+          expected: "all pass = true"
+        - input: {"metrics": {"sharpe": 0.2, "max_dd": 0.30}, "criteria": [{"name": "sharpe", "threshold": 0.4, "direction": ">"}, {"name": "max_dd", "threshold": 0.25, "direction": "<"}]}
+          expected: "both fail"
+    - function: go_no_go
+      cases:
+        - input: {"hypothesis_result": {"reject_h0": true}, "criteria_results": [{"pass": true}, {"pass": true}]}
+          expected: "decision = GO"
+        - input: {"hypothesis_result": {"reject_h0": false}, "criteria_results": [{"pass": true}, {"pass": true}]}
+          expected: "decision = NO_GO, reasons includes hypothesis failure"
   property_tests:
     - invariant: "Absolute sum of time-series portfolio weights equals 1.0 at every rebalance date"
     - invariant: "Cross-sectional portfolio beta to USD PC1 is within 0.01 of zero at every rebalance date"
     - invariant: "No individual position exceeds max_position_pct parameter"
     - invariant: "Momentum signal bounded in [-1, 1] before dispersion deflation"
+    - invariant: "go_no_go returns GO only when reject_h0 is true AND all criteria pass"
 
 success_criteria:
   metrics:

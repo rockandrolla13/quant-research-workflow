@@ -1,22 +1,26 @@
 ## Review: spec.yaml + formula.md
 ### Symbol Consistency
-- [WARN]: The symbol `$\sigma_{r_{i,t}}$` (volatility of asset returns) is used in the `signal.formula_latex` for the carry signal and in other signal formulas (Eq. 7, 10, 17) but is not explicitly listed in `signal.inputs` or `signal.parameters` within `spec.yaml`. It is a derived quantity, likely from `total_return` using methods in the `risk` module.
-- [WARN]: The symbol `N` in Eq. 6 (`c_t^{\text{Carry}} = \frac{1}{N} \sum_{h=0}^{N-1} c_{t-h}`) is used as a lookback window for carry smoothing, but the symbol table defines `N` as "Number of currency pairs in pool" (`n_currencies` parameter). This is an internal inconsistency within `formula.md`.
+- [ ] WARN: `total_return` (represented as $r_{t-h,t}$ in Eq. 1 and $r_{t+h}$ in Eq. 18) is a primary input for the momentum signal and mentioned in `data_schema.columns`, but not explicitly listed under `signal.inputs`. `$\sigma_{r_{i,t}}$` (asset return volatility, used in Eq. 7, 10, 15, 17) is crucial for both carry and momentum final weights but is neither an explicit input to the signal nor a parameter, and its derivation (e.g., lookback for volatility calculation) is not specified within the `signal` section.
+  - Suggested addition: Add `total_return` to `signal.inputs`. Add a parameter for `asset_volatility_lookback` or `asset_volatility_decay` and specify how `$\sigma_{r_{i,t}}$` is derived from `total_return` within the `signal` definition or its `inputs` section.
 ### LaTeX Validity
-- [PASS]: The `signal.formula_latex` field in `spec.yaml` is syntactically valid LaTeX.
+- [x] PASS: All LaTeX formulas in `spec.yaml`'s `formula_latex` field and `formula.md` are syntactically valid.
 ### Dimensional Consistency
-- [PASS]: The signal definitions, formulas, and expected outputs across `formula.md` and `spec.yaml` appear dimensionally consistent. For instance, momentum and carry signals are dimensionless, and portfolio weights sum to 1.
+- [x] PASS: The formulas for momentum and carry signals, as well as portfolio weighting schemes, are dimensionally consistent. Signals and weights are dimensionless, and intermediate calculations maintain appropriate units (e.g., percentages, dimensionless ratios).
 ### Test Case Consistency
-- [PASS]: Unit test cases are largely consistent with the mathematical formulas. The expected outcomes for `compute_momentum_signal`, `compute_carry_signal`, and `estimate_covariance` align with the defined equations. Property tests are also consistent with portfolio construction rules. A minor ambiguity exists for `build_cs_weights` when all `signals` are `all_equal` and the method is "long top half, short bottom half", but a reasonable interpretation allows for consistency.
+- [x] PASS: All unit test cases defined in `test_plan.unit_tests` are consistent with the mathematical formulas and descriptions provided in `formula.md` and `module_apis` descriptions. The expected outcomes logically follow from the input conditions as per the equations.
 ### Data Frequency Compatibility
-- [PASS]: The daily frequency of `spot_rate`, `forward_1m`, `forward_6m`, `bid_ask_spread`, and `total_return` specified in `spec.yaml` is compatible with the daily signal calculations and various lookback windows (e.g., 21-252 days for momentum) described in `formula.md`. Rebalance frequencies (5-day, 20-day) are also well-supported by daily data.
+- [x] PASS: The `1d` frequency specified for `signal.inputs` and implied for `data_schema.columns` (e.g., `total_return`) is compatible with the daily calculations required for momentum, carry, and risk metrics (e.g., lookback windows in days, daily rebalancing frequencies).
 ### Unstated Assumptions
-- [WARN]: **Total Return Definition**: The "Computation Steps" mention `total_return` as "spot return + implied carry from 1M forward". This derivation is crucial but not explicitly detailed in `formula.md` or `spec.yaml`'s `data_schema`. — suggested addition: Define how `total_return` is calculated if it's not a direct raw input.
-- [WARN]: **Volatility ($\sigma_{r_i}$) Calculation**: While `risk.estimate_covariance` is described, the specific method (e.g., EWMA lookback, non-EWMA lookback) for deriving the *scalar* asset volatility $\sigma_{r_i}$ (used in carry, IVW, and momentum final weights) from the covariance matrix or daily returns is not explicitly stated. — suggested addition: Specify the exact calculation method and lookback for scalar asset volatility $\sigma_{r_i}$.
-- [WARN]: **Currency Pair Convention**: The universe is "24 USD/FX pairs" but the convention (e.g., always XXX/USD or explicit base/quote for each) is not stated. This impacts carry and return calculations. — suggested addition: Clarify the consistent pricing convention for all currency pairs (e.g., all quoted as Base/USD).
-- [WARN]: **Hysteresis Initialization**: The initial value of `$\hat{S}_{t-1}$` for the hysteresis mechanism in Eq. 3 is not defined. — suggested addition: Specify the initial condition for $\hat{S}_t$ (e.g., zero, or derived from first non-threshold-crossing $S_t$).
-- [WARN]: **USD PC1 Derivation**: The method for deriving the "USD PC1" (Principal Component 1 of USD-based returns) for beta-neutralization is not described. — suggested addition: Briefly describe how the USD PC1 factor is constructed.
+- [ ] WARN:
+    - **Carry smoothing window `L`**: Eq 6 uses `L` for smoothing the carry signal, but `L` is not defined as a parameter in `spec.yaml`.
+        - Suggested addition: Add `carry_smoothing_window_days` to `signal.parameters`.
+    - **Transaction cost parameter `cost_bps`**: The `backtest.compute_pnl` function takes `cost_bps` as an argument, but this parameter's value is not specified in `spec.yaml` or any global configuration.
+        - Suggested addition: Add `transaction_cost_bps` to `signal.parameters` or a dedicated `backtest_parameters` section.
+    - **USD PC1 definition**: The concept of "USD PC1" used for beta neutralisation (Eq 11) and `risk.compute_usd_beta` is not fully defined (e.g., which currencies included, calculation frequency, specific PCA methodology).
+        - Suggested addition: Clarify the methodology for constructing "USD PC1" in the `risk` module or `notes`.
+    - **Covariance matrix detail**: The `notes` specify "All covariance matrices use 3-day non-overlapping returns averaged over 3 starting offsets," which is a crucial detail for `risk.estimate_covariance` but is not explicitly part of the function's description in `module_apis`.
+        - Suggested addition: Include this detail in the `description` for `risk.estimate_covariance`.
 
 ### Summary
 PASS WITH WARNINGS
-The strategy specification is generally well-defined and consistent, but minor clarifications are needed regarding symbol usage, definition of derived inputs, and certain computational assumptions.
+The specification and formulas are largely consistent and well-defined, particularly for the core momentum and carry signals. However, clarity on crucial input definitions (`total_return`, asset volatility derivation), missing parameters (`carry_smoothing_window`, `transaction_cost_bps`), and specific methodological details (USD PC1 construction) would enhance completeness and remove ambiguity.
