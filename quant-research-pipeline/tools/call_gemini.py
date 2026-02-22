@@ -16,9 +16,14 @@ app = typer.Typer()
 
 MODEL = "gemini-2.5-flash"
 
+_cached_client: genai.Client | None = None
+
 
 def _client() -> genai.Client:
-    return genai.Client()
+    global _cached_client
+    if _cached_client is None:
+        _cached_client = genai.Client()
+    return _cached_client
 
 
 def extract_pdf(pdf_path: str, output_path: str) -> str:

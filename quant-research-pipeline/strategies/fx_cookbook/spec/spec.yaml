@@ -1,0 +1,257 @@
+strategy_id: fx_cookbook
+version: "v1.0"
+status: draft
+
+hypotheses:
+  h0: "FX momentum and carry signals have zero predictive power for future currency returns after transaction costs"
+  h1: "Multi-horizon momentum and carry signals generate positive risk-adjusted returns (Sharpe > 0.4) net of transaction costs in USD/FX markets"
+  test: "two-sided t-test on annualised Sharpe ratio vs 0"
+  alpha: 0.05
+  effect_size: 0.4
+
+signal:
+  name: fx_cookbook_composite
+  formula_latex: "S_{i,t}^{\\text{final}} = \\hat{S}_t / \\max(\\tilde{\\sigma}_t, \\tilde{\\sigma}^{\\text{floor}}_t) \\text{ (momentum)}; \\quad S_{i,t}^{\\text{Carry}} = c_{i,t} / \\sigma_{r_{i,t}} \\text{ (carry)}"
+  inputs:
+    - name: spot_rate
+      dtype: float64
+      frequency: 1d
+      source: "Bloomberg or equivalent FX data provider"
+    - name: forward_1m
+      dtype: float64
+      frequency: 1d
+      source: "Bloomberg (1M FX forward)"
+    - name: forward_6m
+      dtype: float64
+      frequency: 1d
+      source: "Bloomberg (6M FX forward for carry)"
+    - name: bid_ask_spread
+      dtype: float64
+      frequency: 1d
+      source: "Bloomberg or historical average x 1.5"
+  parameters:
+    - name: lookback_min
+      value: 21
+      tunable: false
+    - name: lookback_max
+      value: 252
+      tunable: false
+    - name: hysteresis_threshold
+      value: 0.333
+      tunable: true
+    - name: vol_decay_diagonal
+      value: 252
+      tunable: true
+    - name: vol_decay_offdiag
+      value: 756
+      tunable: true
+    - name: rebalance_freq_medium
+      value: 20
+      tunable: false
+    - name: rebalance_freq_short
+      value: 5
+      tunable: false
+    - name: max_position_pct
+      value: 0.15
+      tunable: true
+    - name: dispersion_floor_percentile
+      value: 0.25
+      tunable: true
+    - name: n_currencies
+      value: 24
+      tunable: false
+
+data_schema:
+  universe: "24 USD/FX pairs: AUD, EUR, GBP, CHF, SEK, NOK, NZD, CAD, JPY, BRL, CZK, KRW, MXN, PLN, RUB, SGD, TRY, TWD, ZAR, HUF, ILS, INR, THB + USD"
+  columns:
+    - name: date
+      dtype: datetime
+      nullable: false
+    - name: currency_pair
+      dtype: str
+      nullable: false
+    - name: spot_rate
+      dtype: float64
+      nullable: false
+    - name: forward_1m
+      dtype: float64
+      nullable: false
+    - name: forward_6m
+      dtype: float64
+      nullable: true
+    - name: bid_ask_spread
+      dtype: float64
+      nullable: false
+    - name: total_return
+      dtype: float64
+      nullable: false
+  splits:
+    train:
+      start: "2000-01-01"
+      end: "2014-12-31"
+    validate:
+      start: "2015-01-01"
+      end: "2018-12-31"
+    holdout:
+      start: "2019-01-01"
+      end: "2024-12-31"
+      touched: false
+
+module_apis:
+  - module: signals
+    functions:
+      - name: compute_momentum_signal
+        args:
+          - name: returns
+            type: "pd.DataFrame"
+          - name: lookback_min
+            type: int
+          - name: lookback_max
+            type: int
+          - name: hysteresis_threshold
+            type: float
+        returns: "pd.DataFrame"
+        description: "Compute momentum signal for all currencies. Returns DataFrame with columns [date, currency, raw_signal, dispersion, final_signal]."
+      - name: compute_carry_signal
+        args:
+          - name: spot
+            type: "pd.Series"
+          - name: forward
+            type: "pd.Series"
+          - name: volatility
+            type: "pd.Series"
+        returns: "pd.Series"
+        description: "Compute carry signal: (spot - forward) / forward, smoothed, divided by volatility."
+      - name: compute_mso_signal
+        args:
+          - name: ir_spread
+            type: "pd.Series"
+          - name: windows
+            type: "list[int]"
+        returns: "pd.Series"
+        description: "Compute Momentum Spill-Over signal from interest rate spread changes, averaged over windows [21, 42, 63]."
+
+  - module: portfolio
+    functions:
+      - name: build_ts_weights
+        args:
+          - name: signals
+            type: "pd.DataFrame"
+          - name: volatilities
+            type: "pd.DataFrame"
+          - name: max_position
+            type: float
+        returns: "pd.DataFrame"
+        description: "Build time-series portfolio weights using inverse volatility weighting. Normalise absolute sum to 1. Apply position caps."
+      - name: build_cs_weights
+        args:
+          - name: signals
+            type: "pd.DataFrame"
+          - name: betas
+            type: "pd.Series"
+          - name: max_position
+            type: float
+        returns: "pd.DataFrame"
+        description: "Build cross-sectional weights: long top half, short bottom half, equal weight, beta-neutralise to USD PC1."
+      - name: apply_tranching
+        args:
+          - name: target_weights
+            type: "pd.DataFrame"
+          - name: n_tranches
+            type: int
+        returns: "pd.DataFrame"
+        description: "Apply portfolio tranching: split target into n_tranches sub-portfolios, each rebalanced on different days."
+
+  - module: risk
+    functions:
+      - name: estimate_covariance
+        args:
+          - name: returns
+            type: "pd.DataFrame"
+          - name: decay_diag
+            type: int
+          - name: decay_offdiag
+            type: int
+        returns: "np.ndarray"
+        description: "Estimate exponentially weighted covariance matrix using 3-day non-overlapping returns. Diagonal uses decay_diag, off-diagonal uses decay_offdiag."
+      - name: compute_usd_beta
+        args:
+          - name: returns
+            type: "pd.DataFrame"
+          - name: lookback
+            type: int
+        returns: "pd.Series"
+        description: "Compute rolling beta of each currency to USD PC1 using lookback window."
+
+  - module: backtest
+    functions:
+      - name: run_backtest
+        args:
+          - name: weights
+            type: "pd.DataFrame"
+          - name: returns
+            type: "pd.DataFrame"
+          - name: costs
+            type: "pd.DataFrame"
+        returns: "pd.DataFrame"
+        description: "Run backtest with T+1 execution. Returns DataFrame with columns [date, gross_return, net_return, turnover, cumulative_return]."
+      - name: compute_metrics
+        args:
+          - name: backtest_results
+            type: "pd.DataFrame"
+        returns: dict
+        description: "Compute Sharpe, CAGR, max drawdown, Calmar, Sortino, avg turnover from backtest results."
+
+test_plan:
+  unit_tests:
+    - function: compute_momentum_signal
+      cases:
+        - input: {"returns": "all_positive_returns_252d", "lookback_min": 21, "lookback_max": 252, "hysteresis_threshold": 0.333}
+          expected: "raw_signal close to +1.0 for all currencies"
+        - input: {"returns": "alternating_sign_returns", "lookback_min": 21, "lookback_max": 252, "hysteresis_threshold": 0.333}
+          expected: "raw_signal close to 0.0, hysteresis retains prior signal"
+    - function: compute_carry_signal
+      cases:
+        - input: {"spot": 1.0, "forward": 0.99, "volatility": 0.10}
+          expected: "carry signal = (1.0 - 0.99) / 0.99 / 0.10 ≈ 0.101"
+        - input: {"spot": 1.0, "forward": 1.01, "volatility": 0.10}
+          expected: "carry signal negative (negative carry)"
+    - function: build_cs_weights
+      cases:
+        - input: {"signals": "monotonic_ranking", "betas": "uniform_betas", "max_position": 0.15}
+          expected: "sum of weights * betas ≈ 0 (beta neutral), absolute sum = 1"
+        - input: {"signals": "all_equal", "betas": "varied_betas", "max_position": 0.15}
+          expected: "equal weights before beta adjustment, beta-neutral after"
+    - function: estimate_covariance
+      cases:
+        - input: {"returns": "identity_corr_returns", "decay_diag": 252, "decay_offdiag": 756}
+          expected: "off-diagonal elements near zero, diagonal reflects asset volatilities"
+        - input: {"returns": "perfectly_correlated_pair", "decay_diag": 252, "decay_offdiag": 756}
+          expected: "correlation between pair ≈ 1.0"
+  property_tests:
+    - invariant: "Absolute sum of time-series portfolio weights equals 1.0 at every rebalance date"
+    - invariant: "Cross-sectional portfolio beta to USD PC1 is within 0.01 of zero at every rebalance date"
+    - invariant: "No individual position exceeds max_position_pct parameter"
+    - invariant: "Momentum signal bounded in [-1, 1] before dispersion deflation"
+
+success_criteria:
+  metrics:
+    - name: sharpe_ratio_momentum_ts
+      threshold: 0.4
+      direction: ">"
+    - name: sharpe_ratio_carry_cs
+      threshold: 0.5
+      direction: ">"
+    - name: max_drawdown
+      threshold: 0.25
+      direction: "<"
+    - name: avg_daily_turnover
+      threshold: 0.10
+      direction: "<"
+
+notes: |
+  Implementation priority: Carry (CS max-Sharpe) and Momentum (TS) first.
+  Value, MSO, COFFEE, and CFTC signals are extensions.
+  COFFEE requires DTCC data which may not be freely available.
+  CFTC reversal signal has known discretisation risk — implement with caution.
+  All covariance matrices use 3-day non-overlapping returns averaged over 3 starting offsets.

@@ -1,0 +1,11 @@
+{
+  "strategy_id": "FX Cookbook A Recipe for Systematic Investing in Currency Markets",
+  "method": "gemini",
+  "pages_processed": 45,
+  "avg_chars_per_page": 3946.6,
+  "scanned_detected": false,
+  "warnings": [
+    "Marker failed: CUDA error: no kernel image is available for execution on the device\nSearch for `cudaErrorNoKernelImageForDevice' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.\nCUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1\nCompile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.\n"
+  ],
+  "timestamp": "2026-02-22T03:30:33.237438+00:00"
+}
