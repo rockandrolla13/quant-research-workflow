@@ -1,0 +1,557 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage[margin=1in]{geometry}
+\usepackage{array}
+\usepackage{longtable}
+
+\hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
+
+\title{Pre-Registered Research Note:\\
+  Systematic FX Momentum and Carry Strategies}
+\author{StratPipe — Quant Research Pipeline\\
+  \texttt{strategy\_id: fx\_cookbook, version: v1.0}}
+\date{February 2026}
+
+\begin{document}
+\maketitle
+
+%% ============================================================
+\begin{abstract}
+We implement a systematic FX strategy combining multi-horizon momentum
+and carry signals across 24 USD/FX pairs, following the framework of
+Anand et al.~\cite{anand2019fxcookbook}. Momentum aggregates trend signs
+over 21--252 day lookbacks with hysteresis noise control and dispersion
+deflation. Carry normalises the forward--spot spread by return volatility.
+Time-series portfolios use inverse volatility weighting; cross-sectional
+portfolios are beta-neutralised to USD~PC1. This note pre-registers
+hypotheses, data splits (train 2000--2014, validate 2015--2018, holdout
+2019--2024 untouched), and success criteria before holdout evaluation.
+The primary test is a two-sided $t$-test on annualised Sharpe ratios
+($H_1$: Sharpe $> 0.4$ momentum, $> 0.5$ carry; $\alpha = 0.05$).
+All 18 equations, the full parameter set, and the module API are specified
+below.
+\end{abstract}
+
+%% ============================================================
+\section{Motivation}
+\label{sec:motivation}
+
+FX markets contain a large share of non-profit-seeking participants ---
+corporate hedgers, central banks managing reserves, and passive
+institutional flows --- whose activity creates persistent, exploitable
+price inefficiencies. Unlike equities, where the efficient-market
+hypothesis has substantial empirical support, the FX market's structural
+heterogeneity provides a credible economic mechanism for factor premia.
+
+The dominant structural feature is USD directionality: the first principal
+component of cross-sectional FX returns explains approximately 54\% of
+variance and loads almost uniformly on all USD pairs. Any systematic
+strategy must handle this explicitly. Time-series (directional) strategies
+capture USD trends; cross-sectional (relative-value) strategies neutralise
+USD exposure via beta constraints against PC1.
+
+We focus on two signals with the strongest empirical support and longest
+available histories:
+
+\begin{enumerate}
+  \item \textbf{Momentum}: sign-based trend following averaged over
+    232 lookback windows (21--252 business days), with hysteresis noise
+    control and signal-dispersion deflation.
+  \item \textbf{Carry}: the forward--spot spread normalised by return
+    volatility, representing an ex-ante Sharpe ratio of the roll yield.
+\end{enumerate}
+
+Five additional signals (Value, MSO, COFFEE, CFTC Continuation, CFTC
+Reversal) are documented as extensions but not included in the primary
+hypothesis test.
+
+%% ============================================================
+\section{Mathematical Framework}
+\label{sec:math}
+
+\subsection{Symbol Table}
+
+\begin{longtable}{>{\raggedright}p{2.2cm} p{7.5cm} l l}
+\toprule
+\textbf{Symbol} & \textbf{Meaning} & \textbf{Type} & \textbf{Units} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Symbol} & \textbf{Meaning} & \textbf{Type} & \textbf{Units} \\
+\midrule
+\endhead
+$r_{t-h,t}$ & Total return (spot + carry) from $t{-}h$ to $t$ & scalar & \% \\
+$S_t$ & Raw momentum signal at time $t$ & scalar & -- \\
+$\hat{S}_t$ & Preliminary signal (after hysteresis) & scalar & -- \\
+$\tilde{\sigma}_t$ & Momentum signal dispersion & scalar & -- \\
+$\sigma_{r_i}$ & Volatility of asset $i$ returns & scalar & \% ann. \\
+$w_i$ & Portfolio weight for asset $i$ & scalar & fraction \\
+$\beta_i$ & Beta of currency $i$ to USD PC1 & scalar & -- \\
+$c_i$ & Carry (forward--spot spread) for asset $i$ & scalar & \% \\
+$F_i$ & Forward exchange rate for asset $i$ & scalar & USD/FX \\
+$S_i$ & Spot exchange rate for asset $i$ & scalar & USD/FX \\
+$N$ & Number of currency pairs in pool & int & 24 \\
+$h$ & Lookback window & int & bdays \\
+$\rho$ & Correlation matrix & matrix & -- \\
+$\text{REER}_{i,t}$ & Real effective exchange rate & scalar & index \\
+$\text{PROD}_{i,t}$ & Productivity differential & scalar & log ratio \\
+$\text{TOT}_{i,t}$ & Terms of trade index & scalar & index \\
+$\varepsilon_{i,t}$ & REER misalignment (regression residual) & scalar & log \\
+$I^{NC}_{i,t}$ & CFTC non-commercial long positions & scalar & contracts \\
+$S^{SNC}_{i,t}$ & CFTC non-commercial short positions & scalar & contracts \\
+$\text{MIC}$ & Modified Information Coefficient & scalar & cov \\
+$Q$ & Number of factor signals & int & count \\
+\bottomrule
+\end{longtable}
+
+\subsection{Momentum Signal (Eq.~1--4)}
+
+\paragraph{Eq.~1 --- Momentum Raw Signal.}
+\begin{equation}
+  S_t = \frac{1}{232} \sum_{h=21}^{252} \operatorname{sign}(r_{t-h,t})
+  \label{eq:mom-raw}
+\end{equation}
+The signal averages the sign of total returns across 232 lookback windows
+($h = 21, 22, \ldots, 252$ business days). Bounded: $S_t \in [-1, 1]$.
+
+\paragraph{Eq.~2 --- Momentum Signal Dispersion.}
+\begin{equation}
+  \tilde{\sigma}_t = \sqrt{
+    \frac{1}{232} \sum_{h=21}^{252}
+    \bigl(\operatorname{sign}(r_{t-h,t}) - S_t\bigr)^2
+  }
+  \label{eq:mom-disp}
+\end{equation}
+Cross-lookback variability of the sign readings. Floored at the 25th
+percentile of the cross-asset distribution to prevent division by
+near-zero values.
+
+\paragraph{Eq.~3 --- Momentum Hysteresis Noise Control.}
+\begin{equation}
+  \hat{S}_t = \begin{cases}
+    \operatorname{sign}(S_t), & |S_t| \ge \theta \\
+    \hat{S}_{t-1},            & |S_t| < \theta
+  \end{cases}
+  \label{eq:mom-hyst}
+\end{equation}
+where $\theta = 1/3$. If the raw signal is weak, the prior position is
+retained, reducing turnover.
+
+\paragraph{Eq.~4 --- Momentum Final Signal.}
+\begin{equation}
+  S_t^{\text{final}} = \frac{\hat{S}_t}{
+    \max\!\bigl(\tilde{\sigma}_t,\; \tilde{\sigma}^{\text{floor}}_t\bigr)
+  }
+  \label{eq:mom-final}
+\end{equation}
+Higher dispersion $\to$ lower conviction $\to$ smaller position.
+$\tilde{\sigma}^{\text{floor}}_t$ is the 25th percentile of the
+cross-asset $\tilde{\sigma}$ distribution on day $t$.
+
+\subsection{Carry Signal (Eq.~5--7)}
+
+\paragraph{Eq.~5 --- Carry Signal (raw).}
+\begin{equation}
+  c_i = \frac{S_i - F_i}{F_i}
+  \label{eq:carry-raw}
+\end{equation}
+where $S_i$ = spot, $F_i$ = 1-month forward. Positive carry implies the
+long position earns positive roll yield.
+
+\paragraph{Eq.~6 --- Carry Signal (smoothed).}
+\begin{equation}
+  c_t^{\text{Carry}} = \frac{1}{L} \sum_{h=0}^{L-1} c_{t-h}
+  \label{eq:carry-smooth}
+\end{equation}
+$L$-day moving average for noise reduction.
+
+\paragraph{Eq.~7 --- Carry Signal (risk-adjusted).}
+\begin{equation}
+  S_{i,t}^{\text{Carry}} = \frac{c_{i,t}^{\text{Carry}}}{\sigma_{r_{i,t}}}
+  \label{eq:carry-risk}
+\end{equation}
+Carry divided by asset return volatility $\sigma_{r_{i,t}}$ (not signal
+dispersion). Resembles an ex-ante Sharpe ratio.
+
+\subsection{Value Signal (Eq.~8--9) --- Extension}
+
+\paragraph{Eq.~8 --- DOLS Panel Regression.}
+\begin{equation}
+  \log(\text{REER}_{i,t}) = \alpha_i
+    + \beta^1 \text{PROD}_{i,t}
+    + \beta^2 \text{TOT}_{i,t}
+    + \theta_0
+    + \varepsilon_{i,t}
+  \label{eq:value-dols}
+\end{equation}
+\begin{equation*}
+  \theta_0 = \sum_{s=-1}^{1}
+    \bigl(\psi_s^1 \Delta\text{PROD}_{i,t+s}
+    + \psi_s^2 \Delta\text{TOT}_{i,t+s}\bigr)
+\end{equation*}
+Dynamic OLS with leads/lags. $\alpha_i$ = country fixed effects.
+Estimated per panel (5 panels: EM commodity exporters/importers, East
+Asian tigers, G10 commodity exporters/importers).
+
+\paragraph{Eq.~9 --- Value Signal.}
+\begin{equation}
+  S_{i,t}^V = \varepsilon_{i,t}
+  \label{eq:value-signal}
+\end{equation}
+The residual from Eq.~\ref{eq:value-dols}, converted from REER to USD/FX
+space via matrix inversion.
+
+\subsection{Portfolio Construction (Eq.~10--11, 16--17)}
+
+\paragraph{Eq.~10 --- Inverse Volatility Weights (IVW).}
+\begin{equation}
+  w_i^{\text{IVW}} = \frac{1/\sigma_{r_i}}{\sum_j 1/\sigma_{r_j}}
+  \label{eq:ivw}
+\end{equation}
+Used for time-series momentum and short-term signal portfolios.
+
+\paragraph{Eq.~11 --- Beta Neutralisation.}
+\begin{equation}
+  \arg\min_w \sum_{i=1}^N (w_i - \tilde{w}_i)^2
+  \quad \text{s.t.} \quad \sum_i w_i \beta_i = 0
+  \label{eq:beta-neutral}
+\end{equation}
+$\tilde{w}_i$ = initial weights (equal or rank-based), $\beta_i$ =
+rolling 1-year beta to USD PC1.
+
+\paragraph{Eq.~16 --- Max Sharpe Carry Weights.}
+\setcounter{equation}{15}
+\begin{equation}
+  \arg\max_w \frac{\sum_i w_i c_i}{
+    \sqrt{\sum_i \sum_j w_i w_j \sigma_{i,j}}
+  }
+  \quad \text{s.t.} \quad \sum_i w_i \beta_i = 0
+  \label{eq:max-sharpe}
+\end{equation}
+Maximise ex-ante Sharpe of carry portfolio subject to USD-beta neutrality
+and boundary constraints.
+
+\paragraph{Eq.~17 --- Time-Series Momentum Final Weights.}
+\begin{equation}
+  W_{i,t}^{\text{Trend}} = \frac{
+    S_{i,t}^{\text{final}} / \sigma_{r_{i,t}}
+  }{
+    \sum_j \bigl|S_{j,t}^{\text{final}} / \sigma_{r_{j,t}}\bigr|
+  }
+  \label{eq:ts-weights}
+\end{equation}
+Combines the momentum signal (already deflated by dispersion via
+Eq.~\ref{eq:mom-final}) with inverse volatility weighting. The
+denominator $\sigma_{r_{i,t}}$ is asset return volatility, not signal
+dispersion --- using signal dispersion here would double-deflate.
+
+\subsection{Short-Term Signals (Eq.~12--15) --- Extensions}
+
+\paragraph{Eq.~12 --- Momentum Spill-Over (MSO).}
+The MSO signal captures short-term interest rate momentum spilling into
+FX returns:
+\begin{enumerate}
+  \item $\Delta IR_{i,h}$ = annualised change in 6M interest rate spread
+    over $h \in \{21, 42, 63\}$ days.
+  \item $\sigma_{IR,h}$ = annualised volatility of daily changes in 6M IR
+    differential over same windows.
+  \item $\text{ratio}_h = \Delta IR_{i,h} / \sigma_{IR,h}$.
+  \item $S_t^{\text{MSO}} = \tfrac{1}{3} \sum_{h} \text{ratio}_h$, then
+    1-month moving average.
+\end{enumerate}
+\textbf{Filter}: Remove asset if 1-year correlation between past 1-day IR
+spread moves and future 1-day FX returns is negative.
+
+\paragraph{Eq.~13 --- COFFEE Signal.}
+\setcounter{equation}{12}
+\begin{equation}
+  S_t^{\text{COFFEE}} = \frac{
+    \text{NotionalCalls}_{4w} - \text{NotionalPuts}_{4w}
+  }{
+    \sigma_{1y}(\text{NotionalCalls}_{4w} - \text{NotionalPuts}_{4w})
+  }
+  \label{eq:coffee}
+\end{equation}
+European options with $|\delta| \in [0.25, 0.75]$, expiry $< 1$ year.
+4-week aggregate volume, standardised by 1-year rolling volatility.
+Requires DTCC data (short history, 2014+).
+
+\paragraph{Eq.~14 --- CFTC Continuation Signal.}
+\begin{equation}
+  S_{i,t}^{\text{CFTC,C}} = \frac{
+    \sum_{h=0}^{3} I_{i,t-h}^{NC} - \sum_{h=0}^{3} S_{i,t-h}^{SNC}
+  }{
+    \sum_{h=0}^{3} I_{i,t-h}^{NC} + \sum_{h=0}^{3} S_{i,t-h}^{SNC}
+  }
+  \label{eq:cftc-cont}
+\end{equation}
+4-week summed net positioning ratio from non-commercial traders.
+
+\paragraph{Eq.~15 --- CFTC Reversal Signal.}
+\begin{enumerate}
+  \item $z_h$ = z-score of net position over lookback
+    $h \in \{1\text{M}, 2\text{M}, 3\text{M}\}$.
+  \item $\bar{z} = \tfrac{1}{3}(z_{1M} + z_{2M} + z_{3M})$.
+  \item $S_i^{\text{CFTC,R}} = -\bar{z} / \sigma_{r_i, 6M}$.
+\end{enumerate}
+Sign-flipped to represent reversal. Volatility-normalised. Cross-sectional
+only (time-series MIC $\approx 0$). Known discretisation risk from weekly
+CFTC reporting frequency.
+
+\subsection{Modified Information Coefficient (Eq.~18--19)}
+
+\paragraph{Eq.~18 --- MIC.}
+\setcounter{equation}{17}
+\begin{equation}
+  \text{MIC}_{t,h}^{TS} = \mathbb{E}\!\left[
+    \frac{r_{t+h}\, S_t}{\sum_{i=1}^N S_i^2}
+  \right]
+  \label{eq:mic-ts}
+\end{equation}
+\begin{equation}
+  \text{MIC}_{t,h}^{CS} = \mathbb{E}\!\left[
+    \frac{r_{t+h}\, (S_t - \operatorname{median}(S_t))}{
+      \sum_{i=1}^N (S_i - \operatorname{median}(S_i))^2
+    }
+  \right]
+  \label{eq:mic-cs}
+\end{equation}
+Used to evaluate signal predictive power in time-series and
+cross-sectional contexts respectively.
+
+%% ============================================================
+\section{Pre-Registered Methodology}
+\label{sec:methodology}
+
+\subsection{Hypotheses}
+
+\begin{description}
+  \item[$H_0$:] FX momentum and carry signals have zero predictive power
+    for future currency returns after transaction costs.
+  \item[$H_1$:] Multi-horizon momentum and carry signals generate positive
+    risk-adjusted returns (Sharpe $> 0.4$) net of transaction costs in
+    USD/FX markets.
+  \item[Test:] Two-sided $t$-test on annualised Sharpe ratio vs.\ 0.
+  \item[$\alpha$:] 0.05.
+  \item[Effect size:] 0.4 (minimum Sharpe ratio for economic significance).
+\end{description}
+
+\subsection{Data}
+
+\begin{itemize}
+  \item \textbf{Universe}: 24 USD/FX pairs --- G10 (AUD, EUR, GBP, CHF,
+    SEK, NOK, NZD, CAD, JPY) plus select EM (BRL, CZK, KRW, MXN, PLN,
+    RUB, SGD, TRY, TWD, ZAR, HUF, ILS, INR, THB).
+  \item \textbf{Frequency}: Daily.
+  \item \textbf{Columns}: date, currency\_pair, spot\_rate, forward\_1m,
+    forward\_6m (nullable), bid\_ask\_spread, total\_return.
+  \item \textbf{Transaction costs}: Fixed bid--ask spread $= 1.5\times$
+    long-term historical average.
+\end{itemize}
+
+\begin{table}[ht]
+\centering
+\caption{Data splits}
+\label{tab:splits}
+\begin{tabular}{llll}
+\toprule
+\textbf{Split} & \textbf{Start} & \textbf{End} & \textbf{Purpose} \\
+\midrule
+Train    & 2000-01-01 & 2014-12-31 & Signal calibration \\
+Validate & 2015-01-01 & 2018-12-31 & Parameter sensitivity \\
+Holdout  & 2019-01-01 & 2024-12-31 & Final evaluation \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Holdout status: untouched.} Results will only be computed on
+the holdout split after all pre-registered methodology is locked.
+
+\subsection{Procedure}
+
+\begin{enumerate}
+  \item Compute total returns $r_{t-h,t}$ for each currency from spot and
+    1M forward data.
+  \item \textbf{Momentum signal}: For each currency on each day, compute
+    the raw signal (Eq.~\ref{eq:mom-raw}), dispersion
+    (Eq.~\ref{eq:mom-disp}), apply hysteresis (Eq.~\ref{eq:mom-hyst}),
+    and deflate (Eq.~\ref{eq:mom-final}).
+  \item \textbf{Carry signal}: Compute raw carry (Eq.~\ref{eq:carry-raw}),
+    smooth (Eq.~\ref{eq:carry-smooth}), risk-adjust
+    (Eq.~\ref{eq:carry-risk}).
+  \item \textbf{Time-series portfolio}: Apply inverse volatility weighting
+    (Eq.~\ref{eq:ivw}) to momentum signals. Normalise absolute weight sum
+    to 1. Apply position caps at 15\%.
+  \item \textbf{Cross-sectional portfolio}: Rank currencies by carry
+    signal, long top half, short bottom half. Beta-neutralise to USD PC1
+    (Eq.~\ref{eq:beta-neutral}). Optionally use max-Sharpe weights
+    (Eq.~\ref{eq:max-sharpe}).
+  \item \textbf{Tranching}: Split each portfolio into 20 daily tranches
+    for momentum/carry (monthly rebalance), 5 tranches for short-term
+    signals (weekly rebalance).
+  \item \textbf{Backtest}: Execute with T+1 lag. Compute gross and net
+    returns, turnover, cumulative PnL.
+  \item \textbf{Evaluation}: Compute Sharpe, CAGR, max drawdown, Calmar,
+    Sortino, average turnover. Apply $t$-test to Sharpe ratios.
+\end{enumerate}
+
+%% ============================================================
+\section{Expected Results}
+\label{sec:expected}
+
+Under $H_1$, we expect the following performance characteristics on
+the train and validation splits:
+
+\begin{table}[ht]
+\centering
+\caption{Pre-registered success criteria}
+\label{tab:criteria}
+\begin{tabular}{llll}
+\toprule
+\textbf{Metric} & \textbf{Threshold} & \textbf{Direction} & \textbf{Rationale} \\
+\midrule
+Sharpe (momentum TS) & 0.4 & $>$ & Paper reports 0.60 \\
+Sharpe (carry CS)     & 0.5 & $>$ & Paper reports 0.79 \\
+Max drawdown          & 25\% & $<$ & Risk constraint \\
+Avg daily turnover    & 10\% & $<$ & Cost constraint \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The thresholds are set below reported values to account for
+implementation differences, data source discrepancies, and the
+inherent optimism in reported backtests. If train-split Sharpe falls
+below 0.3 or is sign-inconsistent with the paper, we investigate
+data/implementation before proceeding.
+
+%% ============================================================
+\section{Implementation Notes}
+\label{sec:implementation}
+
+\subsection{Module Architecture}
+
+The implementation comprises four modules with ten public functions:
+
+\begin{table}[ht]
+\centering
+\caption{Module API summary}
+\label{tab:modules}
+\begin{tabular}{lll}
+\toprule
+\textbf{Module} & \textbf{Function} & \textbf{Returns} \\
+\midrule
+\texttt{signals}   & \texttt{compute\_momentum\_signal} & DataFrame \\
+                    & \texttt{compute\_carry\_signal}    & Series \\
+                    & \texttt{compute\_mso\_signal}      & Series \\
+\midrule
+\texttt{portfolio}  & \texttt{build\_ts\_weights}   & DataFrame \\
+                    & \texttt{build\_cs\_weights}   & DataFrame \\
+                    & \texttt{apply\_tranching}     & DataFrame \\
+\midrule
+\texttt{risk}      & \texttt{estimate\_covariance} & ndarray \\
+                    & \texttt{compute\_usd\_beta}   & Series \\
+\midrule
+\texttt{backtest}  & \texttt{run\_backtest}        & DataFrame \\
+                    & \texttt{compute\_metrics}     & dict \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Parameter Table}
+
+\begin{table}[ht]
+\centering
+\caption{Strategy parameters}
+\label{tab:params}
+\begin{tabular}{llll}
+\toprule
+\textbf{Parameter} & \textbf{Value} & \textbf{Tunable} & \textbf{Description} \\
+\midrule
+lookback\_min & 21 & No & Min lookback window (bdays) \\
+lookback\_max & 252 & No & Max lookback window (bdays) \\
+hysteresis\_threshold & 0.333 & Yes & Noise control threshold \\
+vol\_decay\_diagonal & 252 & Yes & EWMA decay for variances \\
+vol\_decay\_offdiag & 756 & Yes & EWMA decay for correlations \\
+rebalance\_freq\_medium & 20 & No & Monthly rebalance (bdays) \\
+rebalance\_freq\_short & 5 & No & Weekly rebalance (bdays) \\
+max\_position\_pct & 0.15 & Yes & Per-asset position cap \\
+dispersion\_floor\_pctl & 0.25 & Yes & Floor for $\tilde{\sigma}$ \\
+n\_currencies & 24 & No & Universe size \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%% ============================================================
+\section{Risk Analysis}
+\label{sec:risk}
+
+\begin{description}
+  \item[Carry crash.] EM carry trades are exposed to risk-off events
+    (e.g., Aug 2015, Mar 2020). Beta neutralisation mitigates but does
+    not eliminate this. No explicit drawdown stop is specified.
+
+  \item[Trend reversal regimes.] Post-2008 QE compressed FX volatility
+    and weakened momentum signals. The paper acknowledges declining carry
+    contribution since 2010. Regime-conditional analysis is warranted.
+
+  \item[Value signal overfitting.] DOLS panel regressions on macro data
+    (GDP, ToT) are subject to data revision, look-ahead bias, and
+    parameter instability. The 5-panel structure adds degrees of
+    freedom. Value is designated as an extension, not a primary signal.
+
+  \item[COFFEE data dependency.] DTCC data has short history (2014+) and
+    limited accessibility. MIC levels may be overstated due to
+    survivorship in the available sample.
+
+  \item[CFTC discretisation risk.] Weekly CFTC snapshots introduce
+    material discretisation error, especially for the reversal signal.
+    The paper explicitly tests and warns about this.
+
+  \item[Correlation regime shifts.] IVW vs.\ MCW choice assumes average
+    cross-asset correlation stays below ${\sim}50\%$. If FX correlations
+    spike (e.g., USD crisis), IVW underperforms minimum-correlation
+    weighting.
+
+  \item[Transaction cost sensitivity.] Some short-term signals show
+    Sharpe degradation after costs (MSO: 0.33 before costs, lower
+    after). The fixed $1.5\times$ spread assumption is a simplification;
+    real costs are time-varying and liquidity-dependent.
+\end{description}
+
+%% ============================================================
+% \section{Results}
+% \label{sec:results}
+%
+% UNCOMMENT ONLY AFTER HOLDOUT EVALUATION.
+%
+% Present: equity curves, Sharpe ratios, drawdown analysis, turnover,
+% t-test results, comparison to paper-reported values.
+%
+% \begin{table}[h]
+% \centering
+% \caption{Backtest results (holdout period)}
+% \label{tab:results}
+% \begin{tabular}{lrrr}
+% \toprule
+% \textbf{Metric} & \textbf{Momentum TS} & \textbf{Carry CS} & \textbf{Combined} \\
+% \midrule
+% Sharpe & -- & -- & -- \\
+% CAGR (\%) & -- & -- & -- \\
+% Max DD (\%) & -- & -- & -- \\
+% Calmar & -- & -- & -- \\
+% Sortino & -- & -- & -- \\
+% Avg turnover (\%) & -- & -- & -- \\
+% $t$-stat (Sharpe $\neq 0$) & -- & -- & -- \\
+% $p$-value & -- & -- & -- \\
+% \bottomrule
+% \end{tabular}
+% \end{table}
+
+%% ============================================================
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\end{document}
