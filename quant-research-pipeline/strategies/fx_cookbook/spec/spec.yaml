@@ -1,6 +1,6 @@
 strategy_id: fx_cookbook
 version: "v1.0"
-status: draft
+status: locked
 
 hypotheses:
   h0: "FX momentum and carry signals have zero predictive power for future currency returns after transaction costs"

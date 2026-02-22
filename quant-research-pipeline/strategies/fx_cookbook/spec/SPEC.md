@@ -8,7 +8,7 @@
 |-------------|-------|
 | Strategy ID | fx_cookbook |
 | Version     | v1.0 |
-| Status      | draft |
+| Status      | locked |
 
 ## Hypotheses
 
