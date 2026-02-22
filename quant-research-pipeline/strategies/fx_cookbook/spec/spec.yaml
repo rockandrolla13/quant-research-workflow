@@ -1,5 +1,5 @@
 strategy_id: fx_cookbook
-version: "v1.1"
+version: "v1.2"
 status: locked
 
 hypotheses:
@@ -29,6 +29,10 @@ signal:
       dtype: float64
       frequency: 1d
       source: "Bloomberg or historical average x 1.5"
+    - name: total_return
+      dtype: float64
+      frequency: 1d
+      source: "Derived: spot return + implied carry from forward_1m"
   parameters:
     - name: lookback_min
       value: 21
@@ -57,9 +61,26 @@ signal:
     - name: dispersion_floor_percentile
       value: 0.25
       tunable: true
+    - name: carry_smoothing_window
+      value: 21
+      tunable: true
+    - name: pca_window
+      value: 252
+      tunable: false
+    - name: pca_beta_window
+      value: 1260
+      tunable: false
     - name: n_currencies
       value: 24
       tunable: false
+
+  backtest_parameters:
+    - name: default_cost_bps
+      value: 0
+      description: "Default flat cost in bps. Primary cost model uses bid_ask spreads from data; this is a fallback floor."
+    - name: cost_model
+      value: "spread"
+      description: "Cost model: 'spread' uses bid_ask_spread * 1.5 from data_schema; 'flat' uses default_cost_bps only."
 
 data_schema:
   universe: "24 USD/FX pairs: AUD, EUR, GBP, CHF, SEK, NOK, NZD, CAD, JPY, BRL, CZK, KRW, MXN, PLN, RUB, SGD, TRY, TWD, ZAR, HUF, ILS, INR, THB + USD"
@@ -173,7 +194,23 @@ module_apis:
           - name: decay_offdiag
             type: int
         returns: "np.ndarray"
-        description: "Estimate exponentially weighted covariance matrix using 3-day non-overlapping returns. Diagonal uses decay_diag, off-diagonal uses decay_offdiag."
+        description: "Estimate exponentially weighted covariance matrix using 3-day non-overlapping returns, averaged over 3 starting offsets to reduce discretisation bias. Diagonal uses decay_diag, off-diagonal uses decay_offdiag."
+      - name: compute_asset_volatility
+        args:
+          - name: covariance
+            type: "np.ndarray"
+        returns: "pd.Series"
+        description: "Extract per-asset volatility as sqrt of diagonal of the EWMA covariance matrix. Used in carry risk-adjustment (Eq 7), IVW weighting (Eq 10), and momentum final weights (Eq 17)."
+      - name: compute_usd_pc1
+        args:
+          - name: returns
+            type: "pd.DataFrame"
+          - name: pca_window
+            type: int
+          - name: n_components
+            type: int
+        returns: "pd.Series"
+        description: "Compute PC1 factor from correlation matrix (unit variance) of all 24 USD/FX pairs using pca_window days of rolling daily returns. Rolled monthly. Returns PC1 factor loadings as Series."
       - name: compute_usd_beta
         args:
           - name: returns
@@ -181,7 +218,7 @@ module_apis:
           - name: lookback
             type: int
         returns: "pd.Series"
-        description: "Compute rolling beta of each currency to USD PC1 using lookback window."
+        description: "Compute rolling 5-year (pca_beta_window) beta of each currency to USD PC1 from compute_usd_pc1."
 
   - module: backtest
     functions:
@@ -263,6 +300,18 @@ test_plan:
           expected: "sum of weights * betas ≈ 0 (beta neutral), absolute sum = 1"
         - input: {"signals": "all_equal", "betas": "varied_betas", "max_position": 0.15}
           expected: "equal weights before beta adjustment, beta-neutral after"
+    - function: compute_asset_volatility
+      cases:
+        - input: {"covariance": "identity_matrix_scaled_0.04"}
+          expected: "all volatilities = 0.2 (sqrt of 0.04)"
+        - input: {"covariance": "diagonal_matrix_varied"}
+          expected: "volatilities match sqrt of each diagonal element"
+    - function: compute_usd_pc1
+      cases:
+        - input: {"returns": "perfectly_correlated_24_pairs", "pca_window": 252, "n_components": 1}
+          expected: "PC1 explains ~100% variance, all loadings same sign"
+        - input: {"returns": "independent_noise_24_pairs", "pca_window": 252, "n_components": 1}
+          expected: "PC1 explains ~1/24 variance, loadings approximately equal"
     - function: estimate_covariance
       cases:
         - input: {"returns": "identity_corr_returns", "decay_diag": 252, "decay_offdiag": 756}

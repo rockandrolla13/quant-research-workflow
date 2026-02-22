@@ -7,7 +7,7 @@
 | Field       | Value |
 |-------------|-------|
 | Strategy ID | fx_cookbook |
-| Version     | v1.1 |
+| Version     | v1.2 |
 | Status      | locked |
 
 ## Hypotheses
@@ -38,6 +38,7 @@ $$S_{i,t}^{\text{Carry}} = \frac{c_{i,t}}{\sigma_{r_{i,t}}}$$
 | forward_1m | float64 | 1d | Bloomberg |
 | forward_6m | float64 | 1d | Bloomberg |
 | bid_ask_spread | float64 | 1d | Historical avg x 1.5 |
+| total_return | float64 | 1d | Derived: spot return + implied carry from forward_1m |
 
 ### Parameters
 
@@ -52,7 +53,17 @@ $$S_{i,t}^{\text{Carry}} = \frac{c_{i,t}}{\sigma_{r_{i,t}}}$$
 | rebalance_freq_short | 5 (weekly) | No |
 | max_position_pct | 0.15 | Yes |
 | dispersion_floor_percentile | 0.25 | Yes |
+| carry_smoothing_window | 21 | Yes |
+| pca_window | 252 (1Y) | No |
+| pca_beta_window | 1260 (5Y) | No |
 | n_currencies | 24 | No |
+
+### Backtest Parameters
+
+| Name | Value | Description |
+|------|-------|-------------|
+| default_cost_bps | 0 | Fallback floor cost in bps; primary model uses bid_ask spreads |
+| cost_model | spread | 'spread' uses bid_ask_spread x 1.5; 'flat' uses default_cost_bps only |
 
 ## Data Schema
 
@@ -99,8 +110,10 @@ $$S_{i,t}^{\text{Carry}} = \frac{c_{i,t}}{\sigma_{r_{i,t}}}$$
 ### `risk`
 | Function | Args | Returns | Description |
 |----------|------|---------|-------------|
-| estimate_covariance | returns: DataFrame, decay_diag: int, decay_offdiag: int | ndarray | Exp-weighted cov from 3-day non-overlapping returns |
-| compute_usd_beta | returns: DataFrame, lookback: int | Series | Rolling beta to USD PC1 |
+| estimate_covariance | returns: DataFrame, decay_diag: int, decay_offdiag: int | ndarray | Exp-weighted cov from 3-day non-overlapping returns, averaged over 3 starting offsets |
+| compute_asset_volatility | covariance: ndarray | Series | sqrt(diagonal) of EWMA cov matrix — per-asset vol |
+| compute_usd_pc1 | returns: DataFrame, pca_window: int, n_components: int | Series | PC1 from correlation matrix (unit variance) of 24 USD/FX pairs, rolled monthly |
+| compute_usd_beta | returns: DataFrame, lookback: int | Series | Rolling 5Y beta to USD PC1 from compute_usd_pc1 |
 
 ### `backtest`
 | Function | Args | Returns | Description |
@@ -122,6 +135,8 @@ $$S_{i,t}^{\text{Carry}} = \frac{c_{i,t}}{\sigma_{r_{i,t}}}$$
 - `compute_momentum_signal`: all-positive returns → signal ≈ +1; alternating returns → signal ≈ 0
 - `compute_carry_signal`: positive carry → positive signal; negative carry → negative signal
 - `build_cs_weights`: beta-neutrality (Σ w·β ≈ 0); absolute sum = 1
+- `compute_asset_volatility`: identity x 0.04 → all vols = 0.2; varied diagonal → vols = sqrt(diag)
+- `compute_usd_pc1`: perfect correlation → PC1 ≈ 100% variance; independent noise → PC1 ≈ 1/24 variance
 - `estimate_covariance`: identity returns → diagonal matrix; perfect correlation → ρ ≈ 1
 - `run_backtest`: zero-cost constant weights → gross = net; high turnover → net < gross
 - `compute_pnl`: zero costs → gross = net; nonzero costs → net < gross by cost amount
