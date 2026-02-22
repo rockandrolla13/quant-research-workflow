@@ -1,26 +1,22 @@
 ## Review: spec.yaml + formula.md
 ### Symbol Consistency
-- [ ] WARN: `total_return` (represented as $r_{t-h,t}$ in Eq. 1 and $r_{t+h}$ in Eq. 18) is a primary input for the momentum signal and mentioned in `data_schema.columns`, but not explicitly listed under `signal.inputs`. `$\sigma_{r_{i,t}}$` (asset return volatility, used in Eq. 7, 10, 15, 17) is crucial for both carry and momentum final weights but is neither an explicit input to the signal nor a parameter, and its derivation (e.g., lookback for volatility calculation) is not specified within the `signal` section.
-  - Suggested addition: Add `total_return` to `signal.inputs`. Add a parameter for `asset_volatility_lookback` or `asset_volatility_decay` and specify how `$\sigma_{r_{i,t}}$` is derived from `total_return` within the `signal` definition or its `inputs` section.
+- [PASS] The symbols used within the `signal.formula_latex` field (`hat{S}_t`, `tilde{sigma}_t`, `tilde{sigma}^{\text{floor}}_t`, `c_{i,t}`, `sigma_{r_{i,t}}`) are either explicitly defined as inputs/parameters in `spec.yaml` (e.g., `dispersion_floor_percentile` for `tilde{sigma}^{\text{floor}}_t`) or are clearly intermediate derivations from the specified inputs (e.g., `c_{i,t}` from `spot_rate` and `forward_1m`, `sigma_{r_{i,t}}` from `total_return`). Symbols in `formula.md` pertaining to extension signals (Value, MSO, COFFEE, CFTC) are not expected in the current `spec.yaml` signal definition and are appropriately noted.
+
 ### LaTeX Validity
-- [x] PASS: All LaTeX formulas in `spec.yaml`'s `formula_latex` field and `formula.md` are syntactically valid.
+- [PASS] The `signal.formula_latex` field uses valid LaTeX syntax and appropriate commands for mathematical notation, subscripts, superscripts, and text labels.
+
 ### Dimensional Consistency
-- [x] PASS: The formulas for momentum and carry signals, as well as portfolio weighting schemes, are dimensionally consistent. Signals and weights are dimensionless, and intermediate calculations maintain appropriate units (e.g., percentages, dimensionless ratios).
+- [PASS] The mathematical formulas maintain dimensional consistency. Returns ($r$), signals ($S, \hat{S}, \tilde{\sigma}, c$), and portfolio weights ($w$) are appropriately dimensionless or defined as percentages. The risk-adjusted carry signal ($S_{i,t}^{\text{Carry}}$) and time-series momentum weights ($W_{i,t}^{\text{Trend}}$) are dimensionless, as they involve ratios of quantities with the same units (e.g., percent returns/volatility).
+
 ### Test Case Consistency
-- [x] PASS: All unit test cases defined in `test_plan.unit_tests` are consistent with the mathematical formulas and descriptions provided in `formula.md` and `module_apis` descriptions. The expected outcomes logically follow from the input conditions as per the equations.
+- [PASS] All unit tests specified in `test_plan.unit_tests` are consistent with the corresponding mathematical formulas and descriptions in `formula.md` and `module_apis` in `spec.yaml`. Expected outcomes logically follow from the defined functions and inputs. Property tests also align with general expectations for portfolio behavior and signal characteristics.
+
 ### Data Frequency Compatibility
-- [x] PASS: The `1d` frequency specified for `signal.inputs` and implied for `data_schema.columns` (e.g., `total_return`) is compatible with the daily calculations required for momentum, carry, and risk metrics (e.g., lookback windows in days, daily rebalancing frequencies).
+- [PASS] All `signal.inputs` are specified with a `1d` frequency, which is compatible with the daily computation steps, lookback periods (e.g., `lookback_min`, `lookback_max`), and rebalancing frequencies specified in the strategy. The use of `total_return` (derived daily) for momentum and spot/forward rates for carry aligns with this daily frequency.
+
 ### Unstated Assumptions
-- [ ] WARN:
-    - **Carry smoothing window `L`**: Eq 6 uses `L` for smoothing the carry signal, but `L` is not defined as a parameter in `spec.yaml`.
-        - Suggested addition: Add `carry_smoothing_window_days` to `signal.parameters`.
-    - **Transaction cost parameter `cost_bps`**: The `backtest.compute_pnl` function takes `cost_bps` as an argument, but this parameter's value is not specified in `spec.yaml` or any global configuration.
-        - Suggested addition: Add `transaction_cost_bps` to `signal.parameters` or a dedicated `backtest_parameters` section.
-    - **USD PC1 definition**: The concept of "USD PC1" used for beta neutralisation (Eq 11) and `risk.compute_usd_beta` is not fully defined (e.g., which currencies included, calculation frequency, specific PCA methodology).
-        - Suggested addition: Clarify the methodology for constructing "USD PC1" in the `risk` module or `notes`.
-    - **Covariance matrix detail**: The `notes` specify "All covariance matrices use 3-day non-overlapping returns averaged over 3 starting offsets," which is a crucial detail for `risk.estimate_covariance` but is not explicitly part of the function's description in `module_apis`.
-        - Suggested addition: Include this detail in the `description` for `risk.estimate_covariance`.
+- [WARN] The `signal.name` is `fx_cookbook_composite`, and `signal.formula_latex` provides two distinct formulas (one for momentum, one for carry) separated by a semicolon, but does not define how these two components are combined into a *single composite signal*. The `success_criteria` further imply separate evaluations for `sharpe_ratio_momentum_ts` and `sharpe_ratio_carry_cs`. This creates ambiguity regarding whether `fx_cookbook_composite` produces a single aggregated signal or if it represents a meta-strategy comprising two independently managed sub-strategies. — suggested addition: The `signal.formula_latex` should explicitly define the aggregation method (e.g., simple average, inverse volatility weighted average, etc.) if a single composite signal is intended, or the strategy structure should clarify that these are distinct sub-signals/sub-portfolios.
 
 ### Summary
 PASS WITH WARNINGS
-The specification and formulas are largely consistent and well-defined, particularly for the core momentum and carry signals. However, clarity on crucial input definitions (`total_return`, asset volatility derivation), missing parameters (`carry_smoothing_window`, `transaction_cost_bps`), and specific methodological details (USD PC1 construction) would enhance completeness and remove ambiguity.
+The strategy is well-defined mathematically and programmatically, with consistent symbols, valid LaTeX, and coherent test cases. The primary warning relates to the ambiguity in how the named "composite" signal actually combines its momentum and carry components.
