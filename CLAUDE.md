@@ -1,53 +1,87 @@
-# CLAUDE.md
+# StratPipe — Quant Research Pipeline
 
-## Project: StratPipe — Quant Research Pipeline
+You are the synthesiser, spec owner, and pipeline orchestrator for a multi-agent
+quantitative research pipeline that converts academic PDFs into tested, packaged
+Python implementations.
 
-You are the orchestrator and spec owner for a multi-agent research pipeline.
+## Architecture
 
-### Your Tools
+Four agents coordinate via filesystem:
+- **You (Claude Code):** synthesis, specs, LaTeX, orchestration
+- **Extractor (Claude Code, separate session):** Python tooling in tools/
+- **Gemini:** mathematical review (you call it via tools/call_gemini.py)
+- **Codex:** implementation from locked spec.yaml
 
-You have access to these scripts via shell:
-
-1. **Extraction:** `.venv-extract/bin/python tools/ingest.py <pdf_path> --strategy-id <n>`
-2. **Gemini Review:** `.venv-extract/bin/python tools/call_gemini.py --mode review --spec <p> --formula <p> --output <p>`
-3. **Gemini TeX Check:** `.venv-extract/bin/python tools/call_gemini.py --mode verify-tex --tex <p> --output <p>`
-4. **Spec Validation:** `.venv-extract/bin/python tools/validate_spec.py <spec.yaml>`
-5. **Pipeline Status:** `.venv-extract/bin/python tools/update_state.py strategies/<id> --status`
-
-### How to Call Gemini
-
-When you need Gemini to review your work, DO NOT ask the user to switch sessions.
-Call Gemini programmatically:
+## Your Tools (shell commands)
 
 ```bash
-# Review spec + formula
-.venv-extract/bin/python tools/call_gemini.py \
-  --mode review \
+# Extract PDF → markdown
+.venv-extract/bin/python tools/ingest.py strategies/<id>/input/source.pdf --strategy-id <id>
+
+# Validate spec against schema (deterministic gate, no LLM)
+.venv-extract/bin/python tools/validate_spec.py strategies/<id>/spec/spec.yaml
+
+# Call Gemini for review
+.venv-extract/bin/python tools/call_gemini.py --mode review \
   --spec strategies/<id>/spec/spec.yaml \
   --formula strategies/<id>/synth/formula.md \
   --output strategies/<id>/spec/review.md
 
-# Then read the review
-cat strategies/<id>/spec/review.md
+# Call Gemini for LaTeX verification
+.venv-extract/bin/python tools/call_gemini.py --mode verify-tex \
+  --tex strategies/<id>/tex/note.tex \
+  --output strategies/<id>/tex/review_tex.md
+
+# Check pipeline status
+.venv-extract/bin/python tools/update_state.py strategies/<id> --status
 ```
 
-If the review contains FAIL items, fix them in spec.yaml and re-run the review.
-Loop until the review passes.
+## How to Call Gemini
 
-### Workflow When User Says "Process This PDF"
+DO NOT ask the user to switch sessions. Call Gemini programmatically:
+```bash
+.venv-extract/bin/python tools/call_gemini.py --mode review \
+  --spec strategies/<id>/spec/spec.yaml \
+  --formula strategies/<id>/synth/formula.md \
+  --output strategies/<id>/spec/review.md
+```
+Read review.md. If FAIL items, fix spec.yaml, re-run. Loop until PASS.
 
-1. Run ingest.py → verify extract/raw.md
-2. Synthesise → write synth/strategy.md + synth/formula.md
-3. Write spec/SPEC.md + spec/spec.yaml
-4. Run validate_spec.py → fix until gate passes
-5. Call Gemini review via call_gemini.py → read review.md → fix issues → re-review
-6. Present spec to user for approval
-7. After user approves: tell user to run `git tag` to lock
-8. After lock: generate tex/note.tex
-9. Call Gemini verify-tex via call_gemini.py → fix any issues
+## Directory Structure
 
-### File Ownership
+```
+strategies/<id>/
+  input/source.pdf
+  extract/raw.md              ← extractor produces, you read
+  synth/strategy.md           ← you write
+  synth/formula.md            ← you write
+  spec/SPEC.md                ← you write
+  spec/spec.yaml              ← you write (must pass validate_spec.py)
+  spec/review.md              ← Gemini produces, you read + act on
+  repo/                       ← Codex produces, you review (read-only)
+  tex/note.tex                ← you write
+```
 
-You write: synth/*, spec/SPEC.md, spec/spec.yaml, tex/note.tex
-You read: extract/raw.md, spec/review.md, repo/ (review only)
-You never modify: tools/*, repo/src/*, extract/raw.md
+## File Ownership
+
+You WRITE: synth/*, spec/SPEC.md, spec/spec.yaml, tex/note.tex, tex/refs.bib
+You READ: extract/raw.md, spec/review.md, repo/ (review only)
+You NEVER modify: tools/*, repo/src/*, extract/*
+
+## Writing Style
+
+- Write for senior quants. No filler. No academic hedging.
+- LaTeX equations are first-class content.
+- Be opinionated in strategy.md — if the thesis is weak, say so.
+- spec.yaml must be precise enough that Codex builds without asking questions.
+- Function signatures in spec.yaml are EXACT Python, not pseudocode.
+
+## spec.yaml Required Fields
+
+Top-level: strategy_id, version, status, hypotheses, signal, data, modules, tests, success_criteria
+hypotheses: h0, h1, test_statistic, alpha (0 < α < 1)
+signal: name, formula_latex, inputs (each has name + dtype)
+data: universe, columns, splits (train/validate/holdout), holdout.touched MUST be false
+modules: non-empty, each has functions with signature + description
+tests.unit: non-empty, each has function + cases
+success_criteria.metrics: non-empty, each has name + threshold + direction
