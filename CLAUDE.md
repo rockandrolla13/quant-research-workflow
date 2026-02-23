@@ -64,9 +64,9 @@ strategies/<id>/
 
 ## File Ownership
 
-You WRITE: synth/*, spec/SPEC.md, spec/spec.yaml, tex/note.tex, tex/refs.bib
-You READ: extract/raw.md, spec/review.md, repo/ (review only)
-You NEVER modify: tools/*, repo/src/*, extract/*
+You WRITE: strategies/<id>/synth/*, strategies/<id>/spec/SPEC.md, strategies/<id>/spec/spec.yaml, strategies/<id>/tex/note.tex, strategies/<id>/tex/refs.bib
+You READ: strategies/<id>/extract/raw.md, strategies/<id>/spec/review.md, strategies/<id>/repo/ (review only)
+You NEVER modify: tools/*, strategies/<id>/repo/src/*, strategies/<id>/extract/*
 
 ## Writing Style
 
