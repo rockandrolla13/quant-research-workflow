@@ -61,6 +61,7 @@ signal:
     - name: dispersion_floor_percentile
       value: 0.25
       tunable: true
+      description: "25th percentile of the cross-asset momentum signal dispersion (tilde{sigma}) distribution on day t. Floors the denominator in Eq 4 to prevent hyper-inflation of positions when dispersion is near zero."
     - name: carry_smoothing_window
       value: 21
       tunable: true

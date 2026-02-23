@@ -31,6 +31,14 @@
 
 ## Equations
 
+### Eq. 0 — Total Return
+
+$$
+r_{i,t-h,t} = \frac{S_{i,t}}{S_{i,t-h}} - 1 + \sum_{\tau=t-h}^{t-1} \frac{S_{i,\tau} - F_{i,\tau}^{1M}}{F_{i,\tau}^{1M}} \cdot \frac{1}{21}
+$$
+
+**Where**: $S_{i,\tau}$ = spot rate, $F_{i,\tau}^{1M}$ = 1-month forward rate. First term is spot return over $h$ days. Second term accumulates daily implied carry (forward-spot spread annualised to daily by dividing by 21 business days). This is the `total_return` column in `data_schema`, computed from `spot_rate` and `forward_1m` inputs.
+
 ### Eq. 1 — Momentum Raw Signal
 
 $$
