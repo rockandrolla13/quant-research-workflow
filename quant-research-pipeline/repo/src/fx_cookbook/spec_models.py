@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import yaml
 from pydantic import BaseModel, ConfigDict
 
 
 class DataConfig(BaseModel):
-    source: Optional[str] = None
-    frequency: Optional[str] = None
     universe: Optional[str] = None
     train_start: Optional[str] = None
     train_end: Optional[str] = None
@@ -22,17 +20,42 @@ class DataConfig(BaseModel):
 
 
 class SignalConfig(BaseModel):
-    rsi_period: int
-    oversold_threshold: int
-    overbought_threshold: int
+    lookback_min: int
+    lookback_max: int
+    hysteresis_threshold: float
+    vol_decay_diagonal: int
+    vol_decay_offdiag: int
+    rebalance_freq_medium: int
+    rebalance_freq_short: int
+    max_position_pct: float
+    dispersion_floor_percentile: float
+    carry_smoothing_window: int
+    pca_window: int
+    pca_beta_window: int
+    n_currencies: int
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class BacktestConfig(BaseModel):
+    default_cost_bps: float
+    cost_model: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class Criterion(BaseModel):
+    name: str
+    threshold: float
+    direction: str
 
     model_config = ConfigDict(extra="forbid")
 
 
 class ValidationConfig(BaseModel):
-    sharpe_ratio_threshold: Optional[float] = None
-    max_drawdown_threshold: Optional[float] = None
-    cagr_threshold: Optional[float] = None
+    alpha: float
+    effect_size: float
+    criteria: List[Criterion]
 
     model_config = ConfigDict(extra="forbid")
 
@@ -40,7 +63,8 @@ class ValidationConfig(BaseModel):
 class RepoConfig(BaseModel):
     data: DataConfig
     signal: SignalConfig
-    validation: Optional[ValidationConfig] = None
+    backtest: BacktestConfig
+    validation: ValidationConfig
 
     model_config = ConfigDict(extra="forbid")
 

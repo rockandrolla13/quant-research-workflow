@@ -1,6 +1,6 @@
-# Momentum Strategy V1
+# FX Cookbook Strategy
 
-This repository is generated from the locked spec in `spec/spec.yaml`.
+Generated from `strategies/fx_cookbook/spec/spec.yaml` (locked tag `spec-fx_cookbook-v1.2`).
 
 ## Quickstart
 
@@ -15,8 +15,8 @@ This repository is generated from the locked spec in `spec/spec.yaml`.
 .venv-stratpipe/bin/python -m jupyterlab
 ```
 
-Open the notebooks in `repo/notebooks/`.
+Open notebooks in `repo/notebooks/`.
 
 ## References
-- Spec: `../spec/SPEC.md`
+- Spec: `../strategies/fx_cookbook/spec/SPEC.md`
 - Writeup: `../tex/note.tex`

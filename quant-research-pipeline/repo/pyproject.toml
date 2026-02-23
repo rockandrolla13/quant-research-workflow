@@ -1,10 +1,11 @@
 [project]
-name = "strategy-momentum_strategy_v1"
+name = "strategy-fx_cookbook"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
   "pandas==2.3.3",
   "numpy==2.4.2",
+  "scipy==1.17.0",
   "pyyaml==6.0.3",
   "pydantic==2.12.5",
 ]
