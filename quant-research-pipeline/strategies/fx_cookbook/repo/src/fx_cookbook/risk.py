@@ -4,15 +4,62 @@ import numpy as np
 import pandas as pd
 
 
+def _alpha_from_decay(decay: int) -> float:
+    if decay <= 0:
+        raise ValueError("decay must be positive")
+    return 1.0 - np.exp(-1.0 / float(decay))
+
+
+def _non_overlapping_returns(returns: pd.DataFrame, offset: int) -> pd.DataFrame:
+    """Aggregate to non-overlapping 3-day returns using a given starting offset."""
+    if offset < 0 or offset > 2:
+        raise ValueError("offset must be 0, 1, or 2")
+    sub = returns.iloc[offset:]
+    n_blocks = sub.shape[0] // 3
+    if n_blocks == 0:
+        return sub.iloc[:0]
+    trimmed = sub.iloc[: n_blocks * 3]
+    values = trimmed.values.reshape(n_blocks, 3, trimmed.shape[1]).sum(axis=1)
+    index = trimmed.index[2::3]
+    return pd.DataFrame(values, index=index, columns=returns.columns)
+
+
 def estimate_covariance(returns: pd.DataFrame, decay_diag: int, decay_offdiag: int) -> np.ndarray:
-    """Estimate covariance matrix (simplified EWMA approximation)."""
+    """Estimate EWMA covariance with 3-offset averaging to reduce discretisation bias."""
     if returns.empty:
         raise ValueError("returns is empty")
 
-    values = returns.values
-    values = values - np.nanmean(values, axis=0, keepdims=True)
-    cov = np.cov(values, rowvar=False, bias=False)
-    return cov
+    alpha_diag = _alpha_from_decay(decay_diag)
+    alpha_off = _alpha_from_decay(decay_offdiag)
+
+    covariances = []
+    for offset in (0, 1, 2):
+        block = _non_overlapping_returns(returns, offset)
+        if block.empty:
+            continue
+
+        n_assets = block.shape[1]
+        var = np.zeros(n_assets, dtype=float)
+        corr = np.eye(n_assets, dtype=float)
+
+        # "offset" defines the starting day for the 3-day non-overlapping blocks.
+        # Averaging across offsets reduces discretisation bias from arbitrary start dates.
+        for row in block.values:
+            var = var * (1.0 - alpha_diag) + (row**2) * alpha_diag
+            vol = np.sqrt(np.maximum(var, 0.0))
+            safe_vol = np.where(vol == 0.0, 1.0, vol)
+            z = row / safe_vol
+
+            corr = corr * (1.0 - alpha_off) + np.outer(z, z) * alpha_off
+            corr = np.clip(corr, -1.0, 1.0)
+
+        cov = corr * np.outer(vol, vol)
+        covariances.append(cov)
+
+    if not covariances:
+        return np.zeros((returns.shape[1], returns.shape[1]), dtype=float)
+
+    return np.mean(covariances, axis=0)
 
 
 def compute_asset_volatility(covariance: np.ndarray) -> pd.Series:
