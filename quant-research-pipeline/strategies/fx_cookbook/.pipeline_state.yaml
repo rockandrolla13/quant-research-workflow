@@ -2,28 +2,28 @@ strategy_id: fx_cookbook
 stages:
   ingest:
     status: done
-    checked_at: '2026-02-22T04:01:29.223659+00:00'
+    checked_at: '2026-02-22T04:24:59.501668+00:00'
   synth:
     status: done
-    checked_at: '2026-02-22T04:01:29.223704+00:00'
+    checked_at: '2026-02-22T04:24:59.501714+00:00'
   spec:
     status: done
-    checked_at: '2026-02-22T04:01:29.277526+00:00'
+    checked_at: '2026-02-22T04:24:59.559338+00:00'
   spec_review:
     status: done
-    checked_at: '2026-02-22T04:01:29.277587+00:00'
+    checked_at: '2026-02-22T04:24:59.559405+00:00'
   spec_lock:
-    status: pending
-    checked_at: '2026-02-22T04:01:29.279148+00:00'
+    status: done
+    checked_at: '2026-02-22T04:24:59.561003+00:00'
   implement:
-    status: pending
-    checked_at: '2026-02-22T04:01:29.279200+00:00'
+    status: done
+    checked_at: '2026-02-23T00:00:00.000000+00:00'
   test:
-    status: pending
-    checked_at: '2026-02-22T04:01:29.279398+00:00'
+    status: done
+    checked_at: '2026-02-23T00:00:00.000000+00:00'
   tex:
-    status: pending
-    checked_at: '2026-02-22T04:01:29.279432+00:00'
+    status: done
+    checked_at: '2026-02-22T04:24:59.561279+00:00'
   package:
-    status: pending
-    checked_at: '2026-02-22T04:01:29.279456+00:00'
+    status: done
+    checked_at: '2026-02-23T00:00:00.000000+00:00'
