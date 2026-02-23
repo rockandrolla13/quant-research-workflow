@@ -1,3 +1,18 @@
 tools/__pycache__/
 .venv-extract/
+.venv-stratpipe/
 __pycache__/
+
+# Hypothesis test cache
+.hypothesis/
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.synctex.gz
+
+# Input PDFs (large binaries)
+input/

@@ -11,18 +11,18 @@ You do NOT edit:
 2) Then read: `codex_tasks/build-from-spec.md`.
 3) Then execute the task exactly as specified.
 
-## Environment (non-negotiable)
+## Python (absolute)
 Use ONLY:
-- `.venv-stratpipe/bin/python`
-- `.venv-stratpipe/bin/pip`
-- `.venv-stratpipe/bin/pytest`
+- `/home/ak-old-one/projects/pdf-algo-extractor/quant-research-pipeline/.venv-stratpipe/bin/python`
+- `/home/ak-old-one/projects/pdf-algo-extractor/quant-research-pipeline/.venv-stratpipe/bin/pip`
+- `/home/ak-old-one/projects/pdf-algo-extractor/quant-research-pipeline/.venv-stratpipe/bin/pytest`
 
-Never use bare `python`, `pip`, or global interpreters.
+Never use bare `python`, `pip`, `pytest`, or global interpreters.
 
 If `.venv-stratpipe` does not exist:
-- `python3 -m venv .venv-stratpipe`
-- `.venv-stratpipe/bin/pip install -U pip`
-- `.venv-stratpipe/bin/pip install -r requirements-stratpipe.txt`
+- `python3 -m venv /home/ak-old-one/projects/pdf-algo-extractor/quant-research-pipeline/.venv-stratpipe`
+- `/home/ak-old-one/projects/pdf-algo-extractor/quant-research-pipeline/.venv-stratpipe/bin/pip install -U pip`
+- `/home/ak-old-one/projects/pdf-algo-extractor/quant-research-pipeline/.venv-stratpipe/bin/pip install -r requirements-stratpipe.txt`
 
 ## Preconditions (hard gates)
 Before coding:
