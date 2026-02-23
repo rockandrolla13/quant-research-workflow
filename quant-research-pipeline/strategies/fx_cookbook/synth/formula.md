@@ -3,6 +3,8 @@
 > Source: `extract/raw.md`
 > All equations numbered for cross-reference with spec.yaml
 
+**Scope**: This document covers the full FX Cookbook signal family. Only **Momentum** (Eq 0–4, 17) and **Carry** (Eq 5–7, 16) are implemented in `spec.yaml` v1.2 (`fx_cookbook_composite`). Value (Eq 8–9), MSO (Eq 12), COFFEE (Eq 13), and CFTC (Eq 14–15) are future extensions — their inputs and parameters are intentionally absent from `spec.yaml` until scheduled for implementation.
+
 ## Symbol Table
 
 | Symbol | Meaning | Type | Units |

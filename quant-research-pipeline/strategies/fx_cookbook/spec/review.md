@@ -1,31 +1,25 @@
 ## Review: spec.yaml + formula.md
 ### Symbol Consistency
-- [WARN]: The `formula.md` document defines symbols and formulas for "Value" (`REER`, `PROD`, `TOT`, `varepsilon`) and other extension signals (MSO, COFFEE, CFTC: `IR spread`, `NotionalCalls`, `NotionalPuts`, `I^{NC}`, `S^{SNC}`) that do not have corresponding entries in `spec.yaml`'s `signal.inputs` or `parameters`. While `spec.yaml`'s `notes` clarify these are extensions, their presence in `formula.md` (which is presented as defining the `fx_cookbook` strategy) creates a scope mismatch.
-- [PASS]: All symbols directly relevant to the "momentum" and "carry" signals, as indicated by `spec.yaml`'s `formula_latex` and `signal.inputs`, are consistently defined or derivable from the `spec.yaml` inputs and parameters.
+- [X] PASS: All symbols used in the in-scope (Momentum and Carry) formulas in `formula.md` are either explicitly defined as `signal.inputs`, `signal.parameters`, or clearly derived intermediate values within the `module_apis` definitions in `spec.yaml`. The constant '21' used for daily carry conversion in Eq. 0 is a minor fixed value within the formula, not a missing parameter.
 
 ### LaTeX Validity
-- [PASS]: The `formula_latex` field in `spec.yaml` contains syntactically valid LaTeX for the momentum and carry signal definitions.
+- [X] PASS: The `formula_latex` field in `spec.yaml` uses valid LaTeX syntax and renders correctly based on standard LaTeX rules.
 
 ### Dimensional Consistency
-- [WARN]: The Carry Signal `S_{i,t}^{\text{Carry}} = c_{i,t}^{\text{Carry}} / \sigma_{r_{i,t}}` (Eq 7) presents a potential dimensional ambiguity. `c_{i,t}^{\text{Carry}}` (from Eq 5 & 6) is a dimensionless ratio, while `$\sigma_{r_{i,t}}$` is described in the symbol table as `% annualised`. For `S_{i,t}^{\text{Carry}}` to be a true dimensionless Sharpe-like ratio, either `c_{i,t}^{\text{Carry}}` should be implicitly annualised or `$\sigma_{r_{i,t}}$` should be expressed as a daily volatility (or a consistent annualised decimal) to match `c_{i,t}^{\text{Carry}}`'s units. Currently, this implicitly assumes a conversion or interpretation that is not explicitly stated.
-- [PASS]: All other formulas for momentum and portfolio weights appear dimensionally consistent (e.g., dimensionless signals, dimensionless weights).
+- [X] PASS: All equations for Momentum (Eq 0-4, 17) and Carry (Eq 5-7, 16) are dimensionally consistent. For example, returns are dimensionless, signal values are dimensionless, and the risk-adjusted carry signal/weights appropriately handle the units of volatility (%). No circular references were identified.
 
 ### Test Case Consistency
-- [WARN]: The `compute_carry_signal` unit test `input: {"spot": 1.0, "forward": 0.99, "volatility": 0.10}` and `expected: "carry signal = (1.0 - 0.99) / 0.99 / 0.10 ≈ 0.101"` uses `volatility: 0.10`. This implies `0.10` is used as a dimensionless decimal in the division, which is consistent with the formula calculation. However, if `volatility` (i.e., `$\sigma_{r_{i,t}}$`) is `"% annualised"` as per the symbol table (e.g., 10%), then it needs to be made explicit that it's converted to `0.10` (a decimal) for calculation, which relates to the dimensional consistency warning above.
-- [PASS]: All other unit and property test cases are logically consistent with the specified formulas and expected outcomes.
+- [X] PASS: All unit tests and property tests specified in `spec.yaml` are consistent with the mathematical formulas described in `formula.md` and the functional descriptions in `module_apis`. The expected outcomes logically follow from the inputs based on the defined equations and operations.
 
 ### Data Frequency Compatibility
-- [PASS]: The primary momentum and carry signals defined in `spec.yaml`'s `formula_latex` and their associated computation steps are compatible with the `1d` frequency specified for `spot_rate`, `forward_1m`, `forward_6m`, `bid_ask_spread`, and `total_return` in `data_schema` and `signal.inputs`.
-- [WARN]: The inputs for the extension signals (Value, MSO, COFFEE, CFTC) mentioned in `formula.md` (e.g., REER, PROD, TOT, IR spread, NotionalCalls/Puts, CFTC positions) are not specified in `spec.yaml`'s `signal.inputs` or `data_schema`. This is noted as acceptable in `spec.yaml`'s `notes` as they are extensions, but the formulas exist in the document.
+- [X] PASS: All `signal.inputs` and `data_schema.columns` are specified with a `frequency: 1d`, which is fully compatible with the daily granularity required by the lookback windows, rebalancing frequencies, and other time-series computations (e.g., return calculations, smoothing, volatility estimation) detailed in the formulas and parameters.
 
 ### Unstated Assumptions
-- [WARN]: **Consistency of Volatility Units and Annualisation**: The interpretation of `$\sigma_{r_{i,t}}$` (symbol table: `% annualised`) when used in division with dimensionless ratios (`$c_{i,t}^{\text{Carry}}$`) is implicitly assumed.
-  - *Suggested addition*: Explicitly state whether `$\sigma_{r_{i,t}}$` is converted to a decimal (e.g., `10%` becomes `0.10`) for calculations, and clarify if `c_i` is implicitly annualised or `sigma_r_i` is implicitly a daily volatility for these specific formulas.
-- [WARN]: **Scope of `formula.md`**: `formula.md` contains detailed descriptions and equations for signals (Value, MSO, COFFEE, CFTC) that are explicitly described as "extensions" and lower priority in `spec.yaml`'s `notes`, and for which inputs are not defined in `spec.yaml`.
-  - *Suggested addition*: Add a clear disclaimer to `formula.md` distinguishing the core `fx_cookbook_composite` signals (Momentum, Carry) from the discussed extensions, or indicate that `formula.md` describes the *full* `fx_cookbook` family, not just `v1.2`'s `fx_cookbook_composite`.
-- [WARN]: **"USD" in Universe**: The `data_schema.universe` includes "USD" in "24 USD/FX pairs: ... + USD". USD is generally a single currency, not a pair.
-  - *Suggested addition*: Clarify that this refers to USD as the base or quote currency for all 24 pairs, or if "USD" itself represents a specific instrument or market.
+- [X] WARN: 
+    - The constant '21' in Eq. 0 for converting 1-month forward spread to daily implied carry assumes 21 business days in a month. While common, explicitly defining this as a constant or linking it to an average business days parameter would enhance clarity. Suggested addition: "The value '21' in Eq. 0 for daily carry conversion represents the assumed number of business days in a month and is a fixed constant within this formula."
+    - The strategy implicitly operates on "business days" for all time-based parameters and calculations (e.g., lookback_min, rebalance_freq_medium). Making this explicit would improve precision. Suggested addition: "All lookback periods and frequencies (e.g., 21, 252, 20 days) refer to business days."
+    - The specific quoting convention for the "24 USD/FX pairs" (e.g., EUR/USD vs. USD/EUR) is not explicitly stated. While "USD/FX pairs" often implies the foreign currency is the base, clarifying this would remove potential ambiguity for rate calculations (e.g., for positive carry definition). Suggested addition: "All FX pairs are consistently quoted using the [Foreign Currency]/USD convention."
 
 ### Summary
 PASS WITH WARNINGS
-The core momentum and carry signals are well-defined and consistent within the `spec.yaml` and `formula.md`. However, dimensional ambiguity in the carry signal's risk adjustment and scope inconsistencies regarding extension signals in `formula.md` warrant clarification.
+The specification is highly detailed and consistent, with strong alignment between formulas, data, and test plans. Minor clarifications regarding implicit constants, operating days, and FX quoting conventions would enhance absolute precision.
