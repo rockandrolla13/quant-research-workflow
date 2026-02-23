@@ -1,4 +1,10 @@
 data:
+  provider: "local_csv"
+  path: "tests/fixtures/fx_sample.csv"
+  quote_convention: "USD_per_FX"
+  calendar:
+    bdays_per_month: 21
+    bdays_per_year: 252
   universe: "24 USD/FX pairs: AUD, EUR, GBP, CHF, SEK, NOK, NZD, CAD, JPY, BRL, CZK, KRW, MXN, PLN, RUB, SGD, TRY, TWD, ZAR, HUF, ILS, INR, THB + USD"
   train_start: "2000-01-01"
   train_end: "2014-12-31"

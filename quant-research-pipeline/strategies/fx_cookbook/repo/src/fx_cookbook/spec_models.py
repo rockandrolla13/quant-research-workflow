@@ -7,7 +7,18 @@ import yaml
 from pydantic import BaseModel, ConfigDict
 
 
+class CalendarConfig(BaseModel):
+    bdays_per_month: int
+    bdays_per_year: int
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class DataConfig(BaseModel):
+    provider: str
+    path: str
+    quote_convention: str
+    calendar: CalendarConfig
     universe: Optional[str] = None
     train_start: Optional[str] = None
     train_end: Optional[str] = None
