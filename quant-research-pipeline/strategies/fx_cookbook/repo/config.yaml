@@ -1,0 +1,41 @@
+data:
+  universe: "24 USD/FX pairs: AUD, EUR, GBP, CHF, SEK, NOK, NZD, CAD, JPY, BRL, CZK, KRW, MXN, PLN, RUB, SGD, TRY, TWD, ZAR, HUF, ILS, INR, THB + USD"
+  train_start: "2000-01-01"
+  train_end: "2014-12-31"
+  validate_start: "2015-01-01"
+  validate_end: "2018-12-31"
+  holdout_start: "2019-01-01"
+  holdout_end: "2024-12-31"
+  holdout_touched: false
+
+signal:
+  lookback_min: 21
+  lookback_max: 252
+  hysteresis_threshold: 0.333
+  vol_decay_diagonal: 252
+  vol_decay_offdiag: 756
+  rebalance_freq_medium: 20
+  rebalance_freq_short: 5
+  max_position_pct: 0.15
+  dispersion_floor_percentile: 0.25
+  carry_smoothing_window: 21
+  pca_window: 252
+  pca_beta_window: 1260
+  n_currencies: 24
+
+validation:
+  alpha: 0.05
+  effect_size: 0.4
+  criteria:
+    - name: "sharpe_ratio_momentum_ts"
+      threshold: 0.4
+      direction: ">"
+    - name: "sharpe_ratio_carry_cs"
+      threshold: 0.5
+      direction: ">"
+    - name: "max_drawdown"
+      threshold: 0.25
+      direction: "<"
+    - name: "avg_daily_turnover"
+      threshold: 0.1
+      direction: "<"
