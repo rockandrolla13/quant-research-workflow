@@ -1,42 +1,55 @@
-# AGENTS.md — Codex Operating Rules (Project Root)
+# AGENTS.md — Codex Operating Rules
 
 ## You are Codex (Implementer)
-You ONLY write production code under `strategies/<id>/repo/`.
-You do NOT edit:
-- `strategies/<id>/spec/`, `strategies/<id>/synth/`, `strategies/<id>/extract/`, `tools/`, `strategies/<id>/tex/`
-- any locked spec artifacts
+Write production code ONLY under `strategies/<id>/repo/`.
+Do NOT edit: spec/, synth/, extract/, tools/, tex/, or locked artifacts.
 
-## Mandatory First Reads (ALWAYS do this before any work)
-1) Read this file (AGENTS.md).
-2) Then read: `codex_tasks/build-from-spec.md`.
-3) Then execute the task exactly as specified.
+## First Reads (ALWAYS)
+1. This file (AGENTS.md)
+2. `codex_tasks/build-from-spec.md`
+3. Execute task exactly as specified
 
-## Python (absolute)
-Use ONLY:
-- `/home/ak-old-one/projects/pdf-algo-extractor/quant-research-pipeline/.venv-stratpipe/bin/python`
-- `/home/ak-old-one/projects/pdf-algo-extractor/quant-research-pipeline/.venv-stratpipe/bin/pip`
-- `/home/ak-old-one/projects/pdf-algo-extractor/quant-research-pipeline/.venv-stratpipe/bin/pytest`
+## Python Environment
+Use wrapper scripts (preferred):
+```bash
+./tools/run-stratpipe.sh python ...
+./tools/run-stratpipe.sh pip ...
+./tools/run-stratpipe.sh pytest ...
+```
 
-Never use bare `python`, `pip`, `pytest`, or global interpreters.
+If venv missing, create it:
+```bash
+python3 -m venv .venv-stratpipe
+./tools/run-stratpipe.sh pip install -U pip
+./tools/run-stratpipe.sh pip install -r requirements-stratpipe.txt
+```
 
-If `.venv-stratpipe` does not exist:
-- `python3 -m venv /home/ak-old-one/projects/pdf-algo-extractor/quant-research-pipeline/.venv-stratpipe`
-- `/home/ak-old-one/projects/pdf-algo-extractor/quant-research-pipeline/.venv-stratpipe/bin/pip install -U pip`
-- `/home/ak-old-one/projects/pdf-algo-extractor/quant-research-pipeline/.venv-stratpipe/bin/pip install -r requirements-stratpipe.txt`
+Never use bare `python`, `pip`, `pytest`.
+
+## Package Naming (STRICT)
+- Package name = `strategy_id` from spec.yaml
+- Path = `strategies/<strategy_id>/repo/src/<strategy_id>/`
+
+## Import Policy (STRICT)
+- NEVER use `sys.path.insert()` or `sys.path.append()`
+- ALWAYS `pip install -e repo/` before tests
+- Import via package name only
 
 ## Preconditions (hard gates)
-Before coding:
-- Confirm spec is locked: git tag exists `spec-<strategy_id>-v*`
-- Confirm `strategies/<id>/spec/spec.yaml` exists and is the only source of truth
-- If lock/tag missing: STOP and report
+- Spec locked: `git tag -l "spec-<id>-*"` returns result
+- `spec/spec.yaml` exists
+- If missing: STOP and report
 
-## Repo ownership
-You write ONLY in:
-- `strategies/<id>/repo/**`
+## Spec Ambiguity Protocol
+If spec unclear:
+1. STOP immediately
+2. Write `SPEC_CHANGE_REQUEST.md` with questions
+3. Do NOT implement with assumptions
 
-You may READ:
-- `strategies/<id>/spec/spec.yaml`, `strategies/<id>/spec/SPEC.md`, `strategies/<id>/synth/formula.md`
+## Ownership
+Write: `strategies/<id>/repo/**`
+Read: spec.yaml, SPEC.md, formula.md
 
-## Execution policy
-Follow the 10-step build order in `codex_tasks/build-from-spec.md` exactly.
-Checkpoint commits after each major step.
+## Execution
+Follow 10-step build in `codex_tasks/build-from-spec.md`.
+Checkpoint commits after each step.

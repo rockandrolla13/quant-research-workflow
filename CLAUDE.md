@@ -1,87 +1,49 @@
 # StratPipe — Quant Research Pipeline
 
-You are the synthesiser, spec owner, and pipeline orchestrator for a multi-agent
-quantitative research pipeline that converts academic PDFs into tested, packaged
-Python implementations.
+Synthesiser, spec owner, and orchestrator for multi-agent pipeline converting academic PDFs to tested Python implementations.
 
 ## Architecture
+Four agents via filesystem: **You** (synthesis/specs/LaTeX), **Extractor** (tools/), **Gemini** (math review), **Codex** (implementation).
 
-Four agents coordinate via filesystem:
-- **You (Claude Code):** synthesis, specs, LaTeX, orchestration
-- **Extractor (Claude Code, separate session):** Python tooling in tools/
-- **Gemini:** mathematical review (you call it via tools/call_gemini.py)
-- **Codex:** implementation from locked spec.yaml
-
-## Your Tools (shell commands)
-
+## Tools
 ```bash
-# Extract PDF → markdown
-.venv-extract/bin/python tools/ingest.py strategies/<id>/input/source.pdf --strategy-id <id>
-
-# Validate spec against schema (deterministic gate, no LLM)
-.venv-extract/bin/python tools/validate_spec.py strategies/<id>/spec/spec.yaml
-
-# Call Gemini for review
-.venv-extract/bin/python tools/call_gemini.py --mode review \
-  --spec strategies/<id>/spec/spec.yaml \
-  --formula strategies/<id>/synth/formula.md \
-  --output strategies/<id>/spec/review.md
-
-# Call Gemini for LaTeX verification
-.venv-extract/bin/python tools/call_gemini.py --mode verify-tex \
-  --tex strategies/<id>/tex/note.tex \
-  --output strategies/<id>/tex/review_tex.md
-
-# Check pipeline status
-.venv-extract/bin/python tools/update_state.py strategies/<id> --status
+./tools/run-extract.sh python tools/ingest.py <pdf> -s <id>      # PDF→markdown
+./tools/run-extract.sh python tools/validate_spec.py <spec.yaml> # Schema gate
+./tools/run-extract.sh python tools/call_gemini.py --mode review \
+  --spec <spec.yaml> --formula <formula.md> -o <review.md>       # Gemini review
+./tools/run-extract.sh python tools/call_gemini.py --mode verify-tex \
+  --tex <note.tex> --bib <refs.bib> -o <review_tex.md>           # LaTeX check
+./tools/run-extract.sh python tools/update_state.py <dir> --status
+./tools/run-stratpipe.sh pytest <tests> -q                       # Tests
 ```
 
-## How to Call Gemini
+## Gemini Review
+Call programmatically. Fix WARN-BLOCKING items and re-run. WARN-COSMETIC can remain.
 
-DO NOT ask the user to switch sessions. Call Gemini programmatically:
-```bash
-.venv-extract/bin/python tools/call_gemini.py --mode review \
-  --spec strategies/<id>/spec/spec.yaml \
-  --formula strategies/<id>/synth/formula.md \
-  --output strategies/<id>/spec/review.md
-```
-Read review.md. If FAIL items, fix spec.yaml, re-run. Loop until PASS.
+## formula.md
+MUST have `## Scope` section listing IN-SCOPE (implemented) vs OUT-OF-SCOPE (reference only).
 
 ## Directory Structure
-
 ```
 strategies/<id>/
-  input/source.pdf
-  extract/raw.md              ← extractor produces, you read
-  synth/strategy.md           ← you write
-  synth/formula.md            ← you write
-  spec/SPEC.md                ← you write
-  spec/spec.yaml              ← you write (must pass validate_spec.py)
-  spec/review.md              ← Gemini produces, you read + act on
-  repo/                       ← Codex produces, you review (read-only)
-  tex/note.tex                ← you write
+  input/source.pdf       extract/raw.md (read)      synth/{strategy,formula}.md (write)
+  spec/{SPEC.md,spec.yaml} (write)  spec/review.md (read)
+  repo/ (Codex writes, you review)  tex/{note.tex,refs.bib} (write)
 ```
 
-## File Ownership
+## Ownership
+WRITE: synth/*, spec/SPEC.md, spec/spec.yaml, tex/*
+READ: extract/raw.md, spec/review.md, repo/
+NEVER: tools/*, repo/src/*, extract/*
 
-You WRITE: strategies/<id>/synth/*, strategies/<id>/spec/SPEC.md, strategies/<id>/spec/spec.yaml, strategies/<id>/tex/note.tex, strategies/<id>/tex/refs.bib
-You READ: strategies/<id>/extract/raw.md, strategies/<id>/spec/review.md, strategies/<id>/repo/ (review only)
-You NEVER modify: tools/*, strategies/<id>/repo/src/*, strategies/<id>/extract/*
+## Style
+Senior quants. No filler. LaTeX first-class. Opinionated in strategy.md. spec.yaml = exact Python signatures.
 
-## Writing Style
-
-- Write for senior quants. No filler. No academic hedging.
-- LaTeX equations are first-class content.
-- Be opinionated in strategy.md — if the thesis is weak, say so.
-- spec.yaml must be precise enough that Codex builds without asking questions.
-- Function signatures in spec.yaml are EXACT Python, not pseudocode.
-
-## spec.yaml Required Fields
-
-Top-level: strategy_id, version, status, hypotheses, signal, data, modules, tests, success_criteria
-hypotheses: h0, h1, test_statistic, alpha (0 < α < 1)
-signal: name, formula_latex, inputs (each has name + dtype)
-data: universe, columns, splits (train/validate/holdout), holdout.touched MUST be false
-modules: non-empty, each has functions with signature + description
-tests.unit: non-empty, each has function + cases
-success_criteria.metrics: non-empty, each has name + threshold + direction
+## spec.yaml Fields
+Top: strategy_id, version, status, hypotheses, signal, data_schema, module_apis, test_plan, success_criteria
+hypotheses: h0, h1, test, alpha (0<α<1), effect_size
+signal: name, formula_latex, inputs[{name,dtype}]
+data_schema: universe, columns, splits{train,validate,holdout}
+module_apis: [{module, functions[{name,returns,description}]}]
+test_plan: unit_tests[{function,cases}], property_tests[{invariant}]
+success_criteria: metrics[{name,threshold,direction}]

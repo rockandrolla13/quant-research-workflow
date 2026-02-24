@@ -1,71 +1,69 @@
-# codex_tasks/build-from-spec.md — Build From Locked Spec
+# Build From Locked Spec
 
 ## Task
-The spec is locked (tag: `spec-fx_cookbook-v1`).
-Build the repository under `repo/` from `spec/spec.yaml`.
-Use `/home/ak-old-one/projects/pdf-algo-extractor/quant-research-pipeline/.venv-stratpipe/bin/python` for EVERYTHING.
+Build `repo/` from `spec/spec.yaml`. Spec must be locked (tagged).
 
-## Absolute Rules
-- `spec/spec.yaml` is the only contract: signatures, parameters, tests.
-- Do NOT modify spec/synth/tools/tex.
-- Write ONLY inside `repo/`.
-- Notebooks must be thin import layers (no core logic).
-- If tests fail, fix code not tests.
+## Rules
+- `spec.yaml` is the only contract
+- Write ONLY inside `repo/`
+- Notebooks = thin import layers
+- If tests fail, fix code not tests
 
-## 10-Step Build Order (must follow exactly)
+## 10-Step Build Order
 
 ### 1) Verify gates
-- `git tag --list | grep -F "spec-fx_cookbook-v1"` must succeed
-- `test -f spec/spec.yaml` must succeed
-- If either fails: STOP and report.
+```bash
+git tag -l "spec-<strategy_id>-*"  # must return tag
+test -f spec/spec.yaml             # must exist
+```
+If either fails: STOP.
 
-### 2) Create repo skeleton
-Create:
-- `repo/src/fx_cookbook/`
-- `repo/tests/`
-- `repo/notebooks/`
-- `repo/pyproject.toml`, `repo/README.md`, `repo/Makefile`
-- `repo/.github/workflows/test.yml`
+### 2) Create skeleton
+```
+repo/
+  src/<strategy_id>/
+  tests/
+  notebooks/
+  pyproject.toml, README.md, Makefile
+  .github/workflows/test.yml
+  .gitignore  # __pycache__/, *.egg-info/, .pytest_cache/, etc.
+```
 
-### 3) Step 1.5 — Generate `spec_models.py`
-Create `repo/src/fx_cookbook/spec_models.py`:
-- small Pydantic models for runtime config validation
-- `load_config("config.yaml")` returns a validated object
-- `extra="forbid"` everywhere
+### 3) Generate `spec_models.py`
+Pydantic models + `load_config()` with `extra="forbid"`.
 
 ### 4) Generate `config.yaml`
-Write `repo/config.yaml` from spec parameters and splits.
-Immediately validate:
-- `/home/ak-old-one/projects/pdf-algo-extractor/quant-research-pipeline/.venv-stratpipe/bin/python -c "from src.fx_cookbook.spec_models import load_config; load_config('repo/config.yaml')"`
+From spec parameters/splits. Validate immediately:
+```bash
+./tools/run-stratpipe.sh python -c "from src.<id>.spec_models import load_config; load_config('repo/config.yaml')"
+```
 
 ### 5) Implement `data.py`
-Implement data loading + schema validation (from spec).
-Use `load_config()` and `DataConfig`.
+Data loading + schema validation.
 
 ### 6) Implement `signals.py`
-Implement formula(s) from spec.
-No hardcoded parameters; read from config.
+Formulas from spec. No hardcoded params.
 
 ### 7) Implement `backtest.py`
-Implement minimal backtest harness per spec.
+Minimal backtest harness.
 
 ### 8) Implement `validation.py`
-Implement hypothesis tests + success criteria per spec.
+Hypothesis tests + success criteria.
 
 ### 9) Implement tests
-Generate tests strictly from spec test_plan.
-Add `test_config_loads.py` (config validation test).
+From spec test_plan. Add `test_config_loads.py`.
 
-Run:
-- `/home/ak-old-one/projects/pdf-algo-extractor/quant-research-pipeline/.venv-stratpipe/bin/python -m pytest -q repo/tests`
+**MANDATORY:**
+```bash
+./tools/run-stratpipe.sh pip install -e repo/
+```
 
-### 10) Generate thin notebooks (LAST)
-Create:
-- `repo/notebooks/00_research.ipynb`
-- `repo/notebooks/01_backtest.ipynb`
-They must import from `repo/src/fx_cookbook/`.
+**FORBIDDEN:** `sys.path.insert()` or `sys.path.append()`
 
-## Commands you must use (examples)
-- `/home/ak-old-one/projects/pdf-algo-extractor/quant-research-pipeline/.venv-stratpipe/bin/python -m pytest -q`
-- `/home/ak-old-one/projects/pdf-algo-extractor/quant-research-pipeline/.venv-stratpipe/bin/pip install -e repo`
-Never use bare `python` or global pip.
+**Run:**
+```bash
+./tools/run-stratpipe.sh pytest repo/tests -q
+```
+
+### 10) Generate notebooks (LAST)
+`00_research.ipynb`, `01_backtest.ipynb` — import from package only.
