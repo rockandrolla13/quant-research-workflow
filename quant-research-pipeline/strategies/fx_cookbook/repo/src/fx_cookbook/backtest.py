@@ -4,27 +4,35 @@ import numpy as np
 import pandas as pd
 
 
+def _lagged_weights(weights: pd.DataFrame) -> pd.DataFrame:
+    """T+1 execution: use previous day's weights."""
+    return weights.shift(1).fillna(0.0)
+
+
+def _gross_return(weights_lagged: pd.DataFrame, returns: pd.DataFrame) -> pd.Series:
+    return (weights_lagged * returns).sum(axis=1)
+
+
+def _turnover(weights: pd.DataFrame) -> pd.Series:
+    return weights.diff().abs().sum(axis=1).fillna(0.0)
+
+
 def run_backtest(weights: pd.DataFrame, returns: pd.DataFrame, costs: pd.DataFrame) -> pd.DataFrame:
     """Run backtest with T+1 execution."""
-    weights = weights.copy()
-    returns = returns.copy()
-    costs = costs.copy()
-
-    weights_shifted = weights.shift(1).fillna(0.0)
-    gross_return = (weights_shifted * returns).sum(axis=1)
-
-    turnover = weights.diff().abs().sum(axis=1).fillna(0.0)
+    w_lag = _lagged_weights(weights)
+    gross = _gross_return(w_lag, returns)
+    to = _turnover(weights)
     cost = (costs * weights.diff().abs()).sum(axis=1).fillna(0.0)
 
-    net_return = gross_return - cost
+    net_return = gross - cost
     cumulative_return = (1 + net_return).cumprod() - 1
 
     return pd.DataFrame(
         {
             "date": returns.index,
-            "gross_return": gross_return.values,
+            "gross_return": gross.values,
             "net_return": net_return.values,
-            "turnover": turnover.values,
+            "turnover": to.values,
             "cumulative_return": cumulative_return.values,
         }
     )
@@ -34,14 +42,13 @@ def compute_pnl(
     weights: pd.DataFrame, returns: pd.DataFrame, cost_bps: float, bid_ask: pd.DataFrame
 ) -> pd.DataFrame:
     """Compute daily PnL from weights and returns with transaction costs."""
-    weights_shifted = weights.shift(1).fillna(0.0)
-    gross_pnl = (weights_shifted * returns).sum(axis=1)
+    w_lag = _lagged_weights(weights)
+    gross_pnl = _gross_return(w_lag, returns)
 
-    turnover = weights.diff().abs().sum(axis=1).fillna(0.0)
-    # assume initial establishment trades incur costs on first day
-    turnover.iloc[0] = weights.iloc[0].abs().sum()
+    to = _turnover(weights)
+    to.iloc[0] = weights.iloc[0].abs().sum()
     spread = bid_ask.mean(axis=1).fillna(0.0)
-    cost = turnover * (cost_bps / 10000.0) * spread
+    cost = to * (cost_bps / 10000.0) * spread
 
     net_pnl = gross_pnl - cost
     cumulative_net = net_pnl.cumsum()
@@ -57,7 +64,7 @@ def compute_pnl(
     )
 
 
-def compute_metrics(backtest_results: pd.DataFrame) -> dict:
+def compute_metrics(backtest_results: pd.DataFrame, bdays_per_year: int = 252) -> dict:
     """Compute Sharpe, CAGR, max drawdown, Calmar, Sortino, avg turnover."""
     if "net_return" in backtest_results:
         r = backtest_results["net_return"].astype(float)
@@ -68,10 +75,10 @@ def compute_metrics(backtest_results: pd.DataFrame) -> dict:
 
     mean = r.mean()
     std = r.std(ddof=1)
-    sharpe = (np.sqrt(252) * mean / std) if std != 0 else 0.0
+    sharpe = (np.sqrt(bdays_per_year) * mean / std) if std != 0 else 0.0
 
     cumulative = (1 + r).cumprod()
-    years = len(r) / 252.0
+    years = len(r) / float(bdays_per_year)
     cagr = (cumulative.iloc[-1] ** (1 / years) - 1) if years > 0 else 0.0
 
     peak = cumulative.cummax()
@@ -82,7 +89,7 @@ def compute_metrics(backtest_results: pd.DataFrame) -> dict:
 
     downside = r[r < 0]
     downside_std = downside.std(ddof=1)
-    sortino = (np.sqrt(252) * mean / downside_std) if downside_std != 0 else 0.0
+    sortino = (np.sqrt(bdays_per_year) * mean / downside_std) if downside_std != 0 else 0.0
 
     avg_turnover = float(backtest_results.get("turnover", pd.Series([0.0])).mean())
 

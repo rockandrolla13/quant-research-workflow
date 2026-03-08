@@ -3,13 +3,51 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .spec_models import load_config
+
+def _compute_sign_stack(returns: pd.DataFrame, lookbacks: list[int]) -> np.ndarray:
+    """Compute sign(rolling_mean) for each lookback. Returns (n_lookbacks, n_dates, n_currencies)."""
+    signs = []
+    for h in lookbacks:
+        r_h = returns.rolling(window=h, min_periods=h).mean()
+        signs.append(np.sign(r_h).values)
+    return np.stack(signs, axis=0)
 
 
-def _dispersion_floor(values: pd.Series, percentile: float) -> float:
-    if values.empty:
-        return 0.0
-    return float(np.nanpercentile(values.values, percentile * 100))
+def _compute_raw_signals(sign_stack: np.ndarray, index: pd.Index, columns: pd.Index) -> pd.DataFrame:
+    """Average sign across lookbacks to get raw momentum signal."""
+    return pd.DataFrame(np.nanmean(sign_stack, axis=0), index=index, columns=columns)
+
+
+def _apply_hysteresis(
+    raw_signals: pd.DataFrame, threshold: float
+) -> pd.DataFrame:
+    """Apply hysteresis filter: signal persists until overridden by strong opposite signal."""
+    vals = raw_signals.values
+    out = np.empty_like(vals)
+    n_rows, n_cols = vals.shape
+    for j in range(n_cols):
+        prev = 0.0
+        for i in range(n_rows):
+            v = vals[i, j]
+            if np.isnan(v):
+                out[i, j] = np.nan
+                continue
+            if abs(v) >= threshold:
+                prev = float(np.sign(v))
+            out[i, j] = prev
+    return pd.DataFrame(out, index=raw_signals.index, columns=raw_signals.columns)
+
+
+def _normalize_by_dispersion(
+    hysteresis: pd.DataFrame, dispersions: pd.DataFrame, floor_pct: float
+) -> pd.DataFrame:
+    """Divide hysteresis signal by floored dispersion."""
+    disp_vals = dispersions.values
+    floors = np.nanpercentile(disp_vals, floor_pct * 100, axis=1, keepdims=True)
+    denom = np.where(disp_vals >= floors, disp_vals, floors)
+    denom = np.where(denom == 0, np.nan, denom)
+    result = hysteresis.values / denom
+    return pd.DataFrame(result, index=hysteresis.index, columns=hysteresis.columns)
 
 
 def compute_momentum_signal(
@@ -17,6 +55,7 @@ def compute_momentum_signal(
     lookback_min: int,
     lookback_max: int,
     hysteresis_threshold: float,
+    dispersion_floor_pct: float = 0.25,
 ) -> pd.DataFrame:
     """Compute momentum signal for all currencies.
 
@@ -25,51 +64,15 @@ def compute_momentum_signal(
     if lookback_min <= 0 or lookback_max < lookback_min:
         raise ValueError("invalid lookback range")
 
-    cfg = load_config()
-    floor_pct = cfg.signal.dispersion_floor_percentile
-
     lookbacks = list(range(lookback_min, lookback_max + 1))
     dates = returns.index
     currencies = returns.columns
 
-    raw_signals = pd.DataFrame(index=dates, columns=currencies, dtype=float)
-    dispersions = pd.DataFrame(index=dates, columns=currencies, dtype=float)
-
-    for h in lookbacks:
-        r_h = returns.rolling(window=h, min_periods=h).mean()
-        sign_h = np.sign(r_h)
-        raw_signals = raw_signals.add(sign_h, fill_value=0.0)
-
-    raw_signals = raw_signals / float(len(lookbacks))
-
-    # dispersion across lookbacks
-    sign_stack = []
-    for h in lookbacks:
-        r_h = returns.rolling(window=h, min_periods=h).mean()
-        sign_stack.append(np.sign(r_h))
-    sign_stack = np.stack([s.values for s in sign_stack], axis=0)
-    dispersion_values = np.nanstd(sign_stack, axis=0)
-    dispersions.loc[:, :] = dispersion_values
-
-    # hysteresis
-    hysteresis = pd.DataFrame(index=dates, columns=currencies, dtype=float)
-    for c in currencies:
-        prev = 0.0
-        for idx in dates:
-            val = raw_signals.at[idx, c]
-            if np.isnan(val):
-                hysteresis.at[idx, c] = np.nan
-                continue
-            if abs(val) >= hysteresis_threshold:
-                prev = float(np.sign(val))
-            hysteresis.at[idx, c] = prev
-
-    final_signal = pd.DataFrame(index=dates, columns=currencies, dtype=float)
-    for idx in dates:
-        floor_val = _dispersion_floor(dispersions.loc[idx], floor_pct)
-        denom = dispersions.loc[idx].copy()
-        denom = denom.where(denom >= floor_val, floor_val)
-        final_signal.loc[idx] = hysteresis.loc[idx] / denom.replace(0, np.nan)
+    sign_stack = _compute_sign_stack(returns, lookbacks)
+    raw_signals = _compute_raw_signals(sign_stack, dates, currencies)
+    dispersions = pd.DataFrame(np.nanstd(sign_stack, axis=0), index=dates, columns=currencies)
+    hysteresis = _apply_hysteresis(raw_signals, hysteresis_threshold)
+    final_signal = _normalize_by_dispersion(hysteresis, dispersions, dispersion_floor_pct)
 
     out = (
         pd.DataFrame({"date": np.repeat(dates.values, len(currencies)), "currency": np.tile(currencies, len(dates))})
@@ -82,17 +85,18 @@ def compute_momentum_signal(
     return out
 
 
-def compute_carry_signal(spot: pd.Series, forward: pd.Series, volatility: pd.Series) -> pd.Series:
+def compute_carry_signal(
+    spot: pd.Series, forward: pd.Series, volatility: pd.Series, smoothing_window: int = 21
+) -> pd.Series:
     """Compute carry signal: (spot - forward) / forward, smoothed, divided by volatility."""
-    cfg = load_config()
-    window = int(cfg.signal.carry_smoothing_window)
-
     raw = (spot - forward) / forward
-    smoothed = raw.rolling(window=window, min_periods=1).mean()
-    return smoothed / volatility
+    smoothed = raw.rolling(window=smoothing_window, min_periods=1).mean()
+    return smoothed / volatility.replace(0, np.nan)
 
 
-def compute_mso_signal(ir_spread: pd.Series, windows: list[int]) -> pd.Series:
+def compute_mso_signal(
+    ir_spread: pd.Series, windows: list[int], smoothing_window: int = 21
+) -> pd.Series:
     """Compute MSO signal from interest rate spread changes, averaged over windows."""
     ratios = []
     for h in windows:
@@ -101,4 +105,4 @@ def compute_mso_signal(ir_spread: pd.Series, windows: list[int]) -> pd.Series:
         ratio = delta / vol
         ratios.append(ratio)
     avg_ratio = pd.concat(ratios, axis=1).mean(axis=1)
-    return avg_ratio.rolling(window=21, min_periods=1).mean()
+    return avg_ratio.rolling(window=smoothing_window, min_periods=1).mean()

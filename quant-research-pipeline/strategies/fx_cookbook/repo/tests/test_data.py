@@ -1,8 +1,4 @@
-import sys
-
 import pandas as pd
-
-sys.path.insert(0, "strategies/fx_cookbook/repo/src")
 
 from fx_cookbook import backtest, portfolio, risk, signals, validation
 from fx_cookbook.data import load_data

@@ -1,7 +1,5 @@
 import numpy as np
 
-import sys
-sys.path.insert(0, "strategies/fx_cookbook/repo/src")
 
 from fx_cookbook.backtest import run_backtest, compute_pnl, compute_metrics
 from .utils import make_returns, make_weights, make_costs, make_bid_ask, make_backtest_results

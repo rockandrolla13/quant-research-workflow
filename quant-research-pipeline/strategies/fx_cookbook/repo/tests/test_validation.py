@@ -1,5 +1,3 @@
-import sys
-sys.path.insert(0, "strategies/fx_cookbook/repo/src")
 
 from fx_cookbook.validation import run_hypothesis_test, evaluate_success_criteria, go_no_go
 from .utils import make_returns

@@ -1,4 +1,4 @@
-.PHONY: test lint install data-sanity backtest notebooks results
+.PHONY: test lint install data-sanity results notebooks
 
 PYTHON := /home/ak-old-one/projects/pdf-algo-extractor/quant-research-pipeline/.venv-stratpipe/bin/python
 
@@ -13,9 +13,6 @@ install:
 
 data-sanity:
 	$(PYTHON) -c "from fx_cookbook.data import load_data; load_data('config.yaml')"
-
-backtest:
-	$(PYTHON) -m fx_cookbook.results
 
 notebooks:
 	$(PYTHON) -m jupyter nbconvert --execute --to notebook notebooks/00_data_sanity.ipynb

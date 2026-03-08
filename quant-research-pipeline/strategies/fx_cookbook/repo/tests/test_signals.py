@@ -3,8 +3,6 @@ import math
 import numpy as np
 import pandas as pd
 
-import sys
-sys.path.insert(0, "strategies/fx_cookbook/repo/src")
 
 from fx_cookbook.signals import compute_momentum_signal, compute_carry_signal
 from .utils import make_returns

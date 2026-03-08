@@ -1,8 +1,6 @@
 import numpy as np
 import pandas as pd
 
-import sys
-sys.path.insert(0, "strategies/fx_cookbook/repo/src")
 
 from fx_cookbook.risk import estimate_covariance, compute_asset_volatility, compute_usd_pc1
 from .utils import make_returns, make_covariance

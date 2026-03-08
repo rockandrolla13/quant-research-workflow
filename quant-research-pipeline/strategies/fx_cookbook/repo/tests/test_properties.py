@@ -2,8 +2,6 @@ import numpy as np
 import pandas as pd
 from hypothesis import HealthCheck, given, settings, strategies as st
 
-import sys
-sys.path.insert(0, "strategies/fx_cookbook/repo/src")
 
 from fx_cookbook.portfolio import build_ts_weights, build_cs_weights
 from fx_cookbook.signals import compute_momentum_signal

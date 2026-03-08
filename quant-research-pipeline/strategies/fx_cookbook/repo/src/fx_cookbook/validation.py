@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from typing import Any
-
 import numpy as np
 import pandas as pd
 from scipy import stats
 
 
-def run_hypothesis_test(returns: pd.Series, alpha: float, effect_size: float) -> dict:
+def run_hypothesis_test(returns: pd.Series, alpha: float, effect_size: float, bdays_per_year: int = 252) -> dict:
     """Two-sided t-test on annualised Sharpe ratio vs 0."""
     r = returns.dropna().astype(float)
     n_obs = int(r.shape[0])
@@ -16,7 +14,7 @@ def run_hypothesis_test(returns: pd.Series, alpha: float, effect_size: float) ->
 
     mean = r.mean()
     std = r.std(ddof=1)
-    sharpe = (np.sqrt(252) * mean / std) if std != 0 else 0.0
+    sharpe = (np.sqrt(bdays_per_year) * mean / std) if std != 0 else 0.0
     t_stat = sharpe * np.sqrt(n_obs)
     p_value = float(stats.t.sf(np.abs(t_stat), df=n_obs - 1) * 2)
     reject = bool((p_value < alpha) and (sharpe > effect_size))
@@ -26,7 +24,7 @@ def run_hypothesis_test(returns: pd.Series, alpha: float, effect_size: float) ->
 
 def evaluate_success_criteria(metrics: dict, criteria: list[dict]) -> list[dict]:
     """Check each metric against its threshold and direction."""
-    results: list[dict[str, Any]] = []
+    results: list[dict] = []
     for c in criteria:
         name = c["name"]
         threshold = c["threshold"]

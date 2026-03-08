@@ -1,5 +1,3 @@
-import sys
-sys.path.insert(0, "strategies/fx_cookbook/repo/src")
 
 import pytest
 
