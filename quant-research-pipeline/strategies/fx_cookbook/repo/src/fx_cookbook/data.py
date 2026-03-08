@@ -114,6 +114,13 @@ def load_data(path: str | None = None) -> pd.DataFrame:
     provider = cfg.data.provider
     data_path = path or cfg.data.path
 
+    # Resolve relative paths against repo root (2 levels up from this file)
+    dp = Path(data_path)
+    if not dp.is_absolute() and not dp.exists():
+        repo_root = Path(__file__).resolve().parents[2]
+        dp = repo_root / dp
+    data_path = str(dp)
+
     if provider == "local_csv":
         source = LocalCSVProvider(data_path)
     elif provider == "local_parquet":
