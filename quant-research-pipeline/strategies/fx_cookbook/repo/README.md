@@ -1,4 +1,4 @@
-# FX Cookbook Strategy (v1.3)
+# FX Cookbook Strategy (v1.4)
 
 Generated from the locked spec at `strategies/fx_cookbook/spec/spec.yaml`.
 

@@ -1,11 +1,13 @@
 # Methodology
 
 This implementation follows `strategies/fx_cookbook/spec/spec.yaml` (v1.2) and provides a minimal but complete
-pipeline for FX momentum and carry replication.
+pipeline for momentum replication, generalised across asset classes via an adapter layer.
 
 ## Data and Returns
-- Inputs are daily USD/FX spot and forward rates plus bid/ask spreads.
-- `total_return` is the daily spot return plus implied carry from 1M forwards.
+- Raw inputs are asset-class-specific (FX: spot/forward rates; credit: spreads/duration).
+- An adapter transforms raw data into a canonical schema: `(date, asset, total_return, bid_ask_spread)`.
+- The domain stack (signals through validation) operates on this canonical schema only.
+- See `docs/DATA_CONTRACT.md` for adapter-specific return computations.
 
 ## Signals
 ### Momentum (Eq. 1–4)
