@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Gemini API wrapper: extract, review, verify-tex modes."""
 
+import os
 from pathlib import Path
 import typer
 from dotenv import load_dotenv
@@ -11,7 +12,7 @@ from rich.console import Console
 load_dotenv()
 console = Console()
 app = typer.Typer()
-MODEL = "gemini-2.5-flash"
+MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 _client_cache: genai.Client | None = None
 
 

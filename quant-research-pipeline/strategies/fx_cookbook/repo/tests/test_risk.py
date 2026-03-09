@@ -2,26 +2,15 @@ import numpy as np
 import pandas as pd
 
 
-from fx_cookbook.risk import estimate_covariance, compute_asset_volatility, compute_usd_pc1
+from fx_cookbook.risk import (
+    estimate_covariance, compute_asset_volatility, compute_usd_pc1,
+    _alpha_from_decay, _non_overlapping_returns,
+)
 from .utils import make_returns, make_covariance
 
 
-def _alpha_from_decay(decay: int) -> float:
-    return 1.0 - np.exp(-1.0 / float(decay))
-
-
-def _non_overlapping_returns(returns: pd.DataFrame, offset: int) -> pd.DataFrame:
-    sub = returns.iloc[offset:]
-    n_blocks = sub.shape[0] // 3
-    if n_blocks == 0:
-        return sub.iloc[:0]
-    trimmed = sub.iloc[: n_blocks * 3]
-    values = trimmed.values.reshape(n_blocks, 3, trimmed.shape[1]).sum(axis=1)
-    index = trimmed.index[2::3]
-    return pd.DataFrame(values, index=index, columns=returns.columns)
-
-
 def _ewma_cov(block: pd.DataFrame, decay_diag: int, decay_offdiag: int) -> np.ndarray:
+    """Reference implementation for verifying estimate_covariance."""
     alpha_diag = _alpha_from_decay(decay_diag)
     alpha_off = _alpha_from_decay(decay_offdiag)
     n_assets = block.shape[1]

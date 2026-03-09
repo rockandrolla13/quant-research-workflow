@@ -47,8 +47,10 @@ def _check_spec_review(d: Path) -> bool:
 
 
 def _check_spec_lock(d: Path) -> bool:
+    git_root = Path(__file__).resolve().parent.parent
     result = subprocess.run(["git", "tag", "-l", f"spec-{d.name}-*"],
-                            capture_output=True, text=True, timeout=5)
+                            capture_output=True, text=True, timeout=5,
+                            cwd=git_root)
     return bool(result.stdout.strip())
 
 

@@ -86,6 +86,7 @@ def _validate_schema(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _compute_total_return(df: pd.DataFrame, bdays_per_month: int) -> pd.DataFrame:
+    """Compute total return = spot return + carry. First observation per currency is NaN (pct_change)."""
     df = df.sort_values(["currency_pair", "date"]).copy()
     spot_ret = df.groupby("currency_pair")["spot_rate"].pct_change()
     carry = (df["spot_rate"] - df["forward_1m"]) / df["forward_1m"] / float(bdays_per_month)
