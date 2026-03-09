@@ -42,26 +42,23 @@ class LocalParquetProvider:
         return df
 
 
-_REQUIRED_COLUMNS: list[dict] = [
+_CANONICAL_COLUMNS: list[dict] = [
     {"name": "date", "dtype": "datetime", "nullable": False},
-    {"name": "currency_pair", "dtype": "str", "nullable": False},
-    {"name": "spot_rate", "dtype": "float64", "nullable": False},
-    {"name": "forward_1m", "dtype": "float64", "nullable": False},
-    {"name": "forward_6m", "dtype": "float64", "nullable": True},
-    {"name": "bid_ask_spread", "dtype": "float64", "nullable": False},
+    {"name": "asset", "dtype": "str", "nullable": False},
     {"name": "total_return", "dtype": "float64", "nullable": True},
+    {"name": "bid_ask_spread", "dtype": "float64", "nullable": False},
 ]
 
 
-def _validate_schema(df: pd.DataFrame) -> pd.DataFrame:
+def _validate_canonical_schema(df: pd.DataFrame) -> pd.DataFrame:
+    """Validate that a DataFrame matches the canonical returns schema."""
     df = df.copy()
-    columns = _REQUIRED_COLUMNS
-    for col in columns:
+    for col in _CANONICAL_COLUMNS:
         name = col["name"]
         dtype = col["dtype"]
         nullable = bool(col["nullable"])
         if name not in df.columns:
-            raise ValueError(f"missing column: {name}")
+            raise ValueError(f"missing canonical column: {name}")
 
         series = df[name]
         if not nullable and series.isna().any():
@@ -79,37 +76,13 @@ def _validate_schema(df: pd.DataFrame) -> pd.DataFrame:
         elif dtype == "float64":
             if not ptypes.is_float_dtype(series):
                 df[name] = pd.to_numeric(series, errors="raise")
-        elif dtype == "int64":
-            if not ptypes.is_integer_dtype(series):
-                df[name] = pd.to_numeric(series, errors="raise").astype("int64")
-    return df
-
-
-def _compute_total_return(df: pd.DataFrame, bdays_per_month: int) -> pd.DataFrame:
-    """Compute total return = spot return + carry. First observation per currency is NaN (pct_change)."""
-    df = df.sort_values(["currency_pair", "date"]).copy()
-    spot_ret = df.groupby("currency_pair")["spot_rate"].pct_change()
-    carry = (df["spot_rate"] - df["forward_1m"]) / df["forward_1m"] / float(bdays_per_month)
-    df["total_return"] = spot_ret + carry
-    return df
-
-
-def _apply_quote_convention(df: pd.DataFrame, quote_convention: str, bdays_per_month: int) -> pd.DataFrame:
-    if quote_convention == "USD_per_FX":
-        return df
-    if quote_convention != "FX_per_USD":
-        raise ValueError(f"unknown quote_convention: {quote_convention}")
-
-    df = df.copy()
-    df["spot_rate"] = 1.0 / df["spot_rate"]
-    df["forward_1m"] = 1.0 / df["forward_1m"]
-    if "forward_6m" in df.columns:
-        df["forward_6m"] = 1.0 / df["forward_6m"]
-    df = _compute_total_return(df, bdays_per_month)
     return df
 
 
 def load_data(path: str | None = None) -> pd.DataFrame:
+    """Load raw data, apply adapter, validate canonical schema."""
+    from .adapters import get_adapter
+
     cfg = load_config("config.yaml")
     provider = cfg.data.provider
     data_path = path or cfg.data.path
@@ -128,13 +101,10 @@ def load_data(path: str | None = None) -> pd.DataFrame:
     else:
         raise ValueError(f"unknown data provider: {provider}")
 
-    df = source.load()
-    df = _validate_schema(df)
+    raw = source.load()
 
-    calendar = cfg.data.calendar
-    df = _apply_quote_convention(df, cfg.data.quote_convention, calendar.bdays_per_month)
-
-    if "total_return" not in df.columns or df["total_return"].isna().any():
-        df = _compute_total_return(df, calendar.bdays_per_month)
+    adapter = get_adapter(cfg.adapter.name, **cfg.adapter.params)
+    df = adapter.adapt(raw)
+    df = _validate_canonical_schema(df)
 
     return df

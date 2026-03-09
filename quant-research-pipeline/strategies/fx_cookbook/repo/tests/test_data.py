@@ -11,7 +11,7 @@ def test_data_pipeline_smoke_from_fixture():
 
     required = {
         "date",
-        "currency_pair",
+        "asset",
         "spot_rate",
         "forward_1m",
         "forward_6m",
@@ -22,18 +22,18 @@ def test_data_pipeline_smoke_from_fixture():
     assert isinstance(df["date"].iloc[0], pd.Timestamp)
     assert df["total_return"].notna().all()
 
-    returns = df.pivot(index="date", columns="currency_pair", values="total_return").sort_index()
+    returns = df.pivot(index="date", columns="asset", values="total_return").sort_index()
     sig = signals.compute_momentum_signal(
         returns, cfg.signal.lookback_min, cfg.signal.lookback_max, cfg.signal.hysteresis_threshold
     )
-    sig_pivot = sig.pivot(index="date", columns="currency", values="final_signal").sort_index()
+    sig_pivot = sig.pivot(index="date", columns="asset", values="final_signal").sort_index()
 
     cov = risk.estimate_covariance(returns, cfg.signal.vol_decay_diagonal, cfg.signal.vol_decay_offdiag)
     vol = risk.compute_asset_volatility(cov)
     vol_df = pd.DataFrame([vol.values] * len(returns), index=returns.index, columns=returns.columns)
 
     weights = portfolio.build_ts_weights(sig_pivot.fillna(0.0), vol_df, cfg.signal.max_position_pct)
-    costs = df.pivot(index="date", columns="currency_pair", values="bid_ask_spread").reindex(returns.index)
+    costs = df.pivot(index="date", columns="asset", values="bid_ask_spread").reindex(returns.index)
 
     bt = backtest.run_backtest(weights, returns, costs)
     metrics = backtest.compute_metrics(bt)

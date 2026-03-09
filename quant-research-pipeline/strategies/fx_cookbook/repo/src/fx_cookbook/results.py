@@ -12,7 +12,7 @@ from .spec_models import load_config
 
 
 def _pivot_returns(df: pd.DataFrame) -> pd.DataFrame:
-    return df.pivot(index="date", columns="currency_pair", values="total_return").sort_index()
+    return df.pivot(index="date", columns="asset", values="total_return").sort_index()
 
 
 def _generate_signals(returns: pd.DataFrame, cfg) -> pd.DataFrame:
@@ -24,7 +24,7 @@ def _generate_signals(returns: pd.DataFrame, cfg) -> pd.DataFrame:
         hysteresis_threshold=cfg.signal.hysteresis_threshold,
         dispersion_floor_pct=cfg.signal.dispersion_floor_percentile,
     )
-    return momentum.pivot(index="date", columns="currency", values="final_signal").sort_index()
+    return momentum.pivot(index="date", columns="asset", values="final_signal").sort_index()
 
 
 def _construct_weights(returns: pd.DataFrame, signal_pivot: pd.DataFrame, cfg) -> pd.DataFrame:
@@ -82,7 +82,7 @@ def run_results(output_dir: str | Path = "outputs") -> dict:
 
     signal_pivot = _generate_signals(returns, cfg)
     weights = _construct_weights(returns, signal_pivot, cfg)
-    costs = df.pivot(index="date", columns="currency_pair", values="bid_ask_spread").reindex(returns.index)
+    costs = df.pivot(index="date", columns="asset", values="bid_ask_spread").reindex(returns.index)
 
     bt = backtest.run_backtest(weights, returns, costs)
     metrics = backtest.compute_metrics(bt)

@@ -20,8 +20,8 @@ def test_compute_momentum_signal_alternating_hysteresis():
     returns = make_returns("alternating_sign_returns")
     result = compute_momentum_signal(returns, lookback_min=21, lookback_max=252, hysteresis_threshold=0.333)
 
-    currency = result["currency"].iloc[0]
-    currency_rows = result[result["currency"] == currency].sort_values("date")
+    currency = result["asset"].iloc[0]
+    currency_rows = result[result["asset"] == currency].sort_values("date")
     last = currency_rows.iloc[-1]
     prev = currency_rows.iloc[-2]
     ffill_final = currency_rows["final_signal"].ffill()

@@ -57,10 +57,18 @@ class ValidationConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class AdapterConfig(BaseModel):
+    name: str = "fx"
+    params: dict = {}
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class RepoConfig(BaseModel):
     data: DataConfig
     signal: SignalConfig
     validation: Optional[ValidationConfig] = None
+    adapter: AdapterConfig = AdapterConfig()
 
     model_config = ConfigDict(extra="forbid")
 

@@ -75,7 +75,7 @@ def compute_momentum_signal(
     final_signal = _normalize_by_dispersion(hysteresis, dispersions, dispersion_floor_pct)
 
     out = (
-        pd.DataFrame({"date": np.repeat(dates.values, len(currencies)), "currency": np.tile(currencies, len(dates))})
+        pd.DataFrame({"date": np.repeat(dates.values, len(currencies)), "asset": np.tile(currencies, len(dates))})
         .assign(
             raw_signal=raw_signals.values.ravel(),
             dispersion=dispersions.values.ravel(),
