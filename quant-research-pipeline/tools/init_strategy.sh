@@ -12,7 +12,7 @@ DIR="$ROOT/strategies/$SID"
 
 [[ -d "$DIR" ]] && echo "⚠️ $DIR exists, adding missing dirs"
 
-mkdir -p "$DIR"/{input,extract/images,synth,spec,repo/src/"$SID",repo/tests,repo/notebooks,tex}
+mkdir -p "$DIR"/{input,extract/images,artifacts,synth,spec,repo/src/"$SID",repo/tests,repo/notebooks,tex}
 
 if [[ -n "$PDF" ]]; then
     [[ ! -f "$PDF" ]] && { echo "❌ PDF not found: $PDF"; exit 1; }
