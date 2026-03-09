@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from .base import CANONICAL_COLUMNS, ReturnsAdapter
+from .credit import CreditAdapter
 from .fx import FxAdapter
 
 _REGISTRY: dict[str, type] = {
     "fx": FxAdapter,
+    "credit": CreditAdapter,
 }
 
 
@@ -18,4 +20,4 @@ def get_adapter(name: str, **params) -> ReturnsAdapter:
     return cls(**params)
 
 
-__all__ = ["CANONICAL_COLUMNS", "ReturnsAdapter", "FxAdapter", "get_adapter"]
+__all__ = ["CANONICAL_COLUMNS", "CreditAdapter", "ReturnsAdapter", "FxAdapter", "get_adapter"]
