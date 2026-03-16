@@ -1,0 +1,616 @@
+# Hypothesis Testing Pipeline — Prompt Guide
+
+A structured sequence of prompts for automating falsifiable, narrow, multiplicity-aware, replication-aware hypothesis testing. Each prompt corresponds to a gate in the research DAG. Execute in order; each gate's output feeds the next.
+
+---
+
+## Stage 0: Research Track Initialisation
+
+### Prompt 0.1 — Define the Research Track
+
+```
+You are initialising a new research track. Define the following and output as YAML:
+
+1. TRACK_ID: a unique snake_case identifier
+2. ECONOMIC_THESIS: one sentence stating the economic mechanism you believe exists
+   (e.g., "credit carry compensates investors for bearing default risk,
+   generating predictable cross-sectional excess returns")
+3. SEARCH_SPACE: enumerate every degree of freedom as a cartesian product
+   - signal_definitions: [list every candidate signal]
+   - transformations: [raw, z-score, rank, percentile, ...]
+   - horizons: [1d, 5d, 21d, 63d, ...]
+   - universes: [IG, HY, EM, ...]
+   Compute |S| = total number of combinations
+4. DATA_PARTITIONS: define three non-overlapping temporal partitions
+   - train: (start_date, end_date) — used for exploration only
+   - holdout: (start_date, end_date) — used for confirmation only
+   - live: (start_date, onward) — used for replication only
+   Record the exact dates. These are immutable once set.
+5. PRIOR_BELIEFS: state your prior on effect size and direction
+   (e.g., "IC ~ 0.03–0.08, positive, Spearman")
+6. ECONOMIC_SIGNIFICANCE_FLOOR: the smallest effect size that would
+   change a portfolio decision (e.g., IC_min = 0.02, Sharpe_min = 0.3)
+
+Freeze this document. All downstream gates reference it.
+No field may be modified after Stage 1 begins.
+```
+
+### Prompt 0.2 — Data Integrity Audit
+
+```
+Before any analysis, audit the raw data for the research track {TRACK_ID}.
+
+For each signal in SEARCH_SPACE.signal_definitions:
+1. Report: observation count, date range, unique entity count, frequency
+2. Missingness analysis:
+   - Total % missing
+   - Is missingness random, monotone, or block-structured?
+   - Cluster entities by missingness pattern (hierarchical clustering
+     on the binary missing/present matrix). Report number of distinct
+     missingness clusters and what characterises each.
+   - FLAG if any missingness cluster aligns with a return-relevant
+     characteristic (sector, rating, liquidity tier)
+3. Stale data detection:
+   - For each signal, compute the fraction of (entity, date) pairs
+     where signal_t == signal_{t-1}. Report by entity.
+   - FLAG if staleness > 20% for any entity
+4. Distributional fingerprint:
+   - Report: mean, median, std, skew, kurtosis, 1st/99th percentiles
+   - Flag if |skew| > 2 or kurtosis > 10
+5. Survivorship check:
+   - How many entities enter/exit the universe over the sample?
+   - Is there a systematic pattern (e.g., defaults drop out,
+     biasing the surviving sample toward higher quality)?
+
+Output: a structured data quality report with PASS/FLAG per check.
+Any FLAG requires a documented decision: fix, exclude, or accept-with-caveat.
+Do not proceed to Stage 1 until all FLAGs are resolved.
+```
+
+---
+
+## Stage 1: Pre-Exploratory EDA
+
+> **Purpose:** Understand the geometry of the data *before* forming hypotheses.
+> **Data used:** Train partition only.
+> **Decision output:** None. This stage is purely descriptive.
+
+### Prompt 1.1 — Marginal Signal Structure
+
+```
+For each candidate signal in SEARCH_SPACE (using TRAIN data only):
+
+1. Generate a QQ plot against the Gaussian distribution.
+   - Facet by non-overlapping sub-periods (e.g., yearly).
+   - Annotate: tail index estimate (Hill estimator for upper tail),
+     kurtosis, Anderson-Darling p-value.
+   - Interpretation: if tails depart convexly, document the degree
+     of fat-tailedness and note that rank-based methods are preferred.
+
+2. Generate a kernel density estimate overlaid on a histogram,
+   with a Gaussian reference density.
+   - Flag any multimodality (Hartigan's dip test, p < 0.05).
+   - Flag discreteness (< 20 unique values per cross-section).
+
+3. For each signal, state in one sentence:
+   "This signal is [light-tailed / moderate / heavy-tailed],
+   [unimodal / multimodal], [continuous / discrete / mixed],
+   and [stationary / drifting] across sub-periods."
+
+Output: a visual report (one page per signal) and a summary table.
+```
+
+### Prompt 1.2 — Cross-Sectional Coverage Heatmap
+
+```
+Construct a coverage heatmap for the primary universe:
+- Axes: entities (y) × dates (x)
+- Color: present (signal observed) vs missing
+- Entity ordering: hierarchical clustering on the missingness pattern
+  (binary vector per entity), using Ward linkage on Hamming distance
+- Annotate: vertical lines at major market events
+  (Fed decisions, credit events, index rebalances)
+
+Deliverables:
+1. The heatmap itself (entity labels on y-axis if ≤ 100, else by cluster)
+2. Effective cross-sectional size over time: N_effective(t) = count of
+   non-missing entities at date t. Plot as a time series below the heatmap.
+3. Document: "The minimum cross-section is N = __ on date __. Periods
+   with N < [threshold] should be excluded or flagged in downstream tests."
+```
+
+### Prompt 1.3 — Signal Persistence Heatmap
+
+```
+For each candidate signal, compute the rank autocorrelation of cross-sectional
+ranks at lags [1d, 2d, 5d, 10d, 21d, 63d]:
+  ρ(lag) = median over dates of Spearman(rank_t, rank_{t-lag})
+
+Display as a heatmap:
+- Rows: signals (ordered by cluster from Prompt 1.4)
+- Columns: lags
+- Color: rank autocorrelation (diverging palette, 0 = white)
+
+Interpretation guide:
+- If ρ(1d) < 0.5: signal is noisy, consider smoothing before use
+- If ρ(21d) > 0.9: signal is very persistent; 5d and 21d horizons
+  are effectively the same bet — flag as redundant
+- If ρ decays exponentially: natural holding period ≈ lag where ρ ≈ 0.5
+- Record the "characteristic decay time" τ for each signal
+  (half-life of the autocorrelation)
+```
+
+### Prompt 1.4 — Dependence Structure Diagnostic
+
+```
+Construct the signal dependence matrix:
+1. For each pair of signals (i, j), compute:
+   ρ_ij = time-average of Spearman(rank_i(t), rank_j(t)) across dates
+2. Display as a clustermap (hierarchical clustering with Ward linkage,
+   Spearman distance = 1 - |ρ_ij|)
+3. Overlay a dendrogram; cut at a threshold that yields interpretable clusters
+4. Compute eigenvalues of the correlation matrix.
+   - Plot a scree plot
+   - Report M_eff = number of eigenvalues > 1 (or use the Li-Ji / Galwey
+     formula for effective number of independent tests)
+   - State: "The search space has |S| = __ nominal combinations but
+     M_eff = __ effective independent dimensions."
+
+This M_eff is used in Stage 3 for multiplicity adjustment.
+Flag signal clusters where max pairwise |ρ| > 0.85 — these should be
+treated as a single hypothesis in the confirmatory gate.
+```
+
+---
+
+## Stage 2: Exploratory Gate (Discovery)
+
+> **Purpose:** Reduce the search space to a candidate set C.
+> **Data used:** Train partition only.
+> **Decision output:** Candidate set C, frozen and immutable.
+
+### Prompt 2.1 — Signal Screening
+
+```
+You are executing the DISCOVERY GATE for research track {TRACK_ID}.
+
+Data: TRAIN partition only. The holdout partition must not be accessed.
+
+For each combination in SEARCH_SPACE (|S| = __ combinations):
+1. Compute the screening statistic:
+   - Primary: median cross-sectional Spearman IC over rolling quarters
+   - Secondary: fraction of quarters with IC > 0 (hit rate)
+2. Apply the screening rule:
+   RETAIN if: median |IC| > {SCREENING_THRESHOLD} (default: 0.03)
+             AND hit_rate > {HIT_RATE_FLOOR} (default: 0.55)
+   DISCARD otherwise.
+
+Output:
+- candidate_set C: list of (signal, transform, horizon) tuples that pass
+- |C|: cardinality of C
+- For each candidate: median IC, hit rate, characteristic decay time τ
+- Screening attrition: "|S| = __ screened → |C| = __ retained (__ % pass rate)"
+
+FREEZE C. Record its hash (SHA-256 of the sorted candidate list).
+No candidates may be added after this point.
+If |C| = 0: the research track has failed at discovery. Archive and stop.
+If |C| > 20: consider tightening the screening threshold or
+  collapsing redundant signals (ρ > 0.85) to their cluster centroid.
+```
+
+### Prompt 2.2 — Post-Discovery Diagnostics (Train-Only)
+
+```
+For each candidate in C (using TRAIN data only):
+
+A. IC TIME SERIES WITH CONFIDENCE BAND
+   - Plot rolling 63d cross-sectional Spearman IC as a time series
+   - Overlay ±2σ bootstrap band around zero (block bootstrap, block_len = 21)
+   - Overlay vertical lines at macro regime events
+   - Annotate: fraction of time IC is above the upper band,
+     below the lower band, and within
+   - Flag signals where >50% of total IC is concentrated in a single
+     contiguous period (regime-dependent signal)
+
+B. QUANTILE SPREAD RETURN HEATMAP (primary diagnostic)
+   - Each period: sort cross-section into quintiles by signal strength
+   - Compute average forward excess return per quintile per period
+   - Display as heatmap: quintile (y) × time period (x), color = excess return
+   - Right margin: time-averaged bar chart per quintile
+   - Bottom margin: long-short (Q5 − Q1) spread return time series
+   - Test for monotonicity: Jonckheere-Terpstra test on the quintile means
+   - Flag non-monotonic patterns (e.g., Q1 and Q5 both outperform Q3)
+
+C. SIGNAL DECAY CURVE
+   - Plot IC (or Q5−Q1 spread) as a function of forward horizon:
+     [1d, 2d, 5d, 10d, 21d, 42d, 63d]
+   - Annotate: horizon of peak IC, shape classification:
+     - "fast_decay": peak at ≤ 5d → execution-sensitive alpha
+     - "slow_hump": peak at 10–42d → fundamental signal
+     - "monotonic_increase": no peak → likely risk factor, not alpha
+   - If "monotonic_increase": FLAG — this signal may be a beta loading.
+     Recommend regressing out market/factor exposure before confirmation.
+
+D. CONDITIONAL STRUCTURE (optional, for enrichment)
+   - Split the sample by a conditioning variable
+     (e.g., high-vol vs low-vol regime, rating bucket, sector)
+   - Repeat the IC computation within each conditioning bucket
+   - Report: is the signal regime-dependent? Sector-dependent?
+   - This is exploratory enrichment, not hypothesis generation.
+     Do NOT add conditioning variables to the candidate set.
+
+Output: a visual report for each candidate, plus a summary table ranking
+candidates by: (1) median IC, (2) monotonicity test p-value, (3) IC stability
+(fraction of time above the zero band), (4) decay shape classification.
+```
+
+---
+
+## Stage 3: Confirmatory Gate (Multiplicity-Aware)
+
+> **Purpose:** Test each candidate in C on the holdout, with proper error control.
+> **Data used:** Holdout partition only. First access to this data.
+> **Decision output:** Rejection set R ⊆ C.
+
+### Prompt 3.1 — Pre-Confirmation Protocol
+
+```
+Before accessing holdout data, finalise the test specification.
+
+For each candidate in C, the confirmatory test is:
+  Estimator:     Spearman IC (cross-sectional, per-period)
+  Null:          H₀: ρ_s ≤ {ECONOMIC_SIGNIFICANCE_FLOOR}
+                 (default: 0.02; this is a non-inferiority null,
+                  not a point null at zero)
+  Alternative:   H₁: ρ_s > {ECONOMIC_SIGNIFICANCE_FLOOR}
+  Test type:     One-sided
+  Test method:   Stationary block bootstrap
+                 (block_len = {BLOCK_LEN}, n_boot = {N_BOOT})
+  Significance:  per-test α determined by multiplicity method
+
+Multiplicity adjustment:
+  Effective tests:     M_eff = __ (from Stage 1, Prompt 1.4)
+  Nominal candidates:  |C| = __
+  Dependence structure: [PRDS / arbitrary / unknown]
+
+  IF PRDS (positive regression dependence on subsets):
+    Method: Benjamini-Hochberg at FDR ≤ {TARGET_FDR} (default: 0.05)
+  IF arbitrary dependence:
+    Method: Benjamini-Yekutieli at FDR ≤ {TARGET_FDR}
+  IF FWER control preferred (selecting single best signal):
+    Method: Holm-Bonferroni at FWER ≤ {TARGET_FWER} (default: 0.05)
+
+  Optional refinement: if M_eff << |C|, use the Meff-adjusted
+  Bonferroni (replace |C| with M_eff in the correction).
+  Document the justification.
+
+Researcher degrees of freedom buffer:
+  If informal exploration preceded this pipeline (e.g., you looked at
+  scatter plots, read papers suggesting carry works), inflate the
+  effective test count: M_adjusted = M_eff × {RDF_MULTIPLIER} (default: 2)
+  Document what prior exploration was done and why the multiplier is fair.
+
+Output: a GATE CONTRACT in the format below. This contract is immutable.
+```
+
+### Prompt 3.2 — Execute Confirmatory Gate
+
+```
+Execute the confirmatory gate for research track {TRACK_ID}.
+
+ACCESS HOLDOUT DATA NOW. This is the first and only access.
+
+For each candidate c_i in C (i = 1, ..., |C|):
+1. Compute the test statistic: Spearman IC on the holdout period
+2. Compute the bootstrap p-value (one-sided, against the
+   non-inferiority null H₀: ρ_s ≤ {FLOOR})
+3. Record: raw_p_i, IC_estimate_i, IC_se_i, IC_95CI_lower_i
+
+Apply multiplicity adjustment:
+4. Sort raw p-values: p_(1) ≤ p_(2) ≤ ... ≤ p_(|C|)
+5. Apply the pre-specified method (BH / BY / Holm):
+   - Compute adjusted p-values: adj_p_i
+   - Determine rejection set: R = {c_i : adj_p_i < α}
+
+Output (structured, all fields required):
+- TABLE: one row per candidate with columns:
+  [candidate, IC_est, IC_se, IC_95CI_lo, raw_p, adj_p, rejected?]
+- REJECTION SET: R = {list of candidates that passed}
+- |R| / |C|: confirmation rate
+- STRONGEST SIGNAL: candidate with lowest adjusted p-value
+- IF |R| = 0: "The research track has failed at confirmation.
+  No signal survives multiplicity-adjusted testing on the holdout.
+  Archive the track. Do not re-test on the same holdout."
+
+Do NOT interpret borderline results as "suggestive" or "trending."
+The gate is binary: reject or fail-to-reject. Record and move on.
+```
+
+### Prompt 3.3 — Post-Confirmation Diagnostics (Holdout Data)
+
+```
+For each signal in the rejection set R (using HOLDOUT data):
+
+A. CONDITIONAL CALIBRATION PLOT
+   - Bin the signal into deciles on the holdout
+   - For each decile, compute: realised hit rate (fraction of correct
+     sign predictions) vs predicted hit rate (from logistic calibration
+     fitted on TRAIN data and applied to holdout)
+   - Plot: predicted (x) vs realised (y), with the 45° line
+   - Annotate: Brier score, calibration slope, calibration intercept
+   - Interpretation:
+     - Points above 45° line: signal is under-confident (leaving money)
+     - Points below: over-confident (position sizing will be too aggressive)
+     - Flat line at ~50%: signal has no real discriminative power
+       despite passing the IC test (pathological case; investigate)
+
+B. DRAWDOWN ANATOMY
+   - Compute the cumulative long-short return (Q5 − Q1) on holdout
+   - Plot the equity curve
+   - Below: scatter of (drawdown duration in days, drawdown depth in bps)
+     for every drawdown episode
+   - Annotate: max drawdown, max duration, recovery time
+   - Flag: if a single drawdown accounts for >50% of the total path
+     variance, the signal may be regime-dependent
+
+C. QUANTILE SPREAD RETURN HEATMAP (repeat of 2.2B, on holdout)
+   - Same construction as the training version
+   - Place training and holdout versions side by side for visual
+     comparison of monotonicity stability
+   - Formal test: Jonckheere-Terpstra on holdout quintile means
+   - Flag: if monotonicity is present in train but absent in holdout
+
+D. TRAIN vs HOLDOUT COMPARISON TABLE
+   For each signal in R, side-by-side:
+   [metric, train_value, holdout_value, ratio]
+   Metrics: IC, IC_se, hit_rate, Q5−Q1 spread, Sharpe, max_drawdown
+   - Flag if holdout IC < 50% of train IC (signal decay)
+   - Flag if holdout Sharpe < 50% of train Sharpe
+```
+
+---
+
+## Stage 4: Replication Gate (Sequential Monitoring)
+
+> **Purpose:** Confirm persistence on genuinely new data.
+> **Data used:** Live partition (post-holdout).
+> **Decision output:** Maintain, downweight, or archive each signal in R.
+
+### Prompt 4.1 — Replication Gate Specification
+
+```
+For each signal in the rejection set R, define the replication protocol:
+
+SEQUENTIAL MONITORING SPECIFICATION:
+  Signal:            {signal_id}
+  Monitoring_times:  [{T1}, {T2}, {T3}, {T4}]
+                     (e.g., [3mo, 6mo, 12mo, 24mo] post-deployment)
+  Spending_function: O'Brien-Fleming
+                     (conservative early, liberal late)
+  Total_alpha:       0.05
+  Estimator:         same as confirmatory gate (Spearman IC, same null)
+  Futility_bound:    conditional_power < 0.20 → early stop for futility
+
+ACTIONS:
+  At each monitoring time t_k:
+    IF cumulative p_k < α_spent(t_k):  CONFIRM — signal is replicated.
+       → lock in; continue monitoring for decay only
+    IF conditional_power(t_k) < 0.20:  FUTILE — archive signal.
+       → remove from production, flag for post-mortem
+    ELSE:                              CONTINUE — insufficient evidence.
+       → maintain current position sizing
+
+Record the alpha spending schedule:
+  t_k:          [{T1}, {T2}, {T3}, {T4}]
+  α_spent(t_k): [computed via O'Brien-Fleming boundary]
+  α_remaining:  0.05 - cumulative α_spent
+
+This protocol is a single pre-registered test per signal.
+No multiplicity adjustment is needed because each signal in R
+was already confirmed and is tested individually on new data.
+```
+
+### Prompt 4.2 — Execute Replication Monitoring (at each scheduled time)
+
+```
+REPLICATION CHECK at monitoring time {T_k} for signal {signal_id}.
+
+Data: all live data from deployment to {T_k}.
+
+1. Compute: Spearman IC on the live period, bootstrap p-value
+   (same specification as confirmatory gate)
+2. Compute: cumulative Z-statistic (information fraction = t_k / T_final)
+3. Look up: O'Brien-Fleming boundary at this information fraction
+4. Compare:
+   - Z_cumulative vs upper boundary → CONFIRM if exceeded
+   - Conditional power estimate → FUTILE if < 0.20
+   - Otherwise → CONTINUE
+
+5. Live diagnostics (for monitoring, not decision-making):
+   - Rolling 63d IC time series on live data
+   - Quantile spread returns on live data (quintile heatmap)
+   - Overlay confirmatory-period estimates for comparison
+
+6. Regime check:
+   - Is the current market regime (vol level, spread level, rate regime)
+     similar to the training and holdout periods?
+   - If the signal is performing very differently from holdout,
+     and the regime has shifted, document this as a potential explanation
+   - Do NOT use regime as an excuse to override the gate decision
+
+Output:
+  Signal:          {signal_id}
+  Monitoring_time: {T_k}
+  Cumulative_IC:   __
+  Cumulative_p:    __
+  Z_statistic:     __
+  OBF_boundary:    __
+  Decision:        [CONFIRM / FUTILE / CONTINUE]
+  Next_check:      {T_{k+1}} or N/A if terminal
+```
+
+---
+
+## Stage 5: Cross-Replication (Optional, Parallel Track)
+
+> **Purpose:** Test generalisability across adjacent universes.
+> **Data used:** Full data from the target universe.
+> **Decision output:** Generalises, universe-specific, or inconclusive.
+
+### Prompt 5.1 — Cross-Universe Replication
+
+```
+For signal {signal_id} confirmed in universe {SOURCE_UNIVERSE}:
+
+Define the cross-replication test:
+  Target_universe:  {TARGET_UNIVERSE} (e.g., HY if source was IG)
+  Prior:            informed by source result
+                    IC_source = __, SE_source = __
+                    Skeptical prior: N(IC_source × 0.5, SE_source² × 4)
+                    (shrink toward zero, inflate uncertainty)
+  Test:             Bayesian one-sided
+  Decision rule:    BF₁₀ > 3  → generalises (substantial evidence)
+                    1/3 < BF₁₀ < 3 → inconclusive
+                    BF₁₀ < 1/3 → universe-specific (evidence against)
+
+Execute:
+1. Compute Spearman IC in target universe (full sample initially;
+   can also follow the train/holdout split if data permits)
+2. Compute Bayes factor against the skeptical prior
+3. Report: IC_target, SE_target, BF₁₀, posterior mean, posterior 95% CI
+
+If GENERALISES:
+  - Consider pooling source and target signals in portfolio construction
+  - The combined signal inherits the stronger of the two replication statuses
+
+If UNIVERSE-SPECIFIC:
+  - Document which economic mechanism might explain the difference
+    (e.g., carry works in IG because default risk is low enough
+    that spread is mostly compensation; in HY, default dominates)
+  - This is a research finding, not a failure
+```
+
+---
+
+## Stage 6: Post-Mortem and Archival
+
+### Prompt 6.1 — Research Track Summary
+
+```
+Compile the final research track report for {TRACK_ID}.
+
+TRACK SUMMARY:
+  Economic thesis:         {ECONOMIC_THESIS}
+  Search space size:       |S| = __
+  Effective dimensionality: M_eff = __
+  Discovery candidates:    |C| = __
+  Confirmed signals:       |R| = __
+  Replicated signals:      |R_rep| = __
+  Cross-replicated:        [yes/no/pending] in universes: __
+
+For each signal that reached confirmation (whether it passed or not):
+  - One-line description
+  - Train IC → Holdout IC → Live IC (if available)
+  - Final status: [confirmed + replicated / confirmed + pending /
+                   confirmed + failed_replication / failed_confirmation /
+                   failed_discovery]
+  - Key diagnostic: the single most informative visual
+    (quantile spread heatmap or IC time series)
+
+LESSONS LEARNED:
+  - What did the pre-exploratory EDA reveal that informed the search?
+  - Were any screening-stage signals surprisingly strong or weak?
+  - Did the multiplicity adjustment change the outcome
+    (i.e., signals that passed raw but failed adjusted)?
+  - What was the confirmation rate |R|/|C| and how does it compare
+    to the base rate for this type of signal?
+  - If the track failed: at which stage? What would you do differently?
+
+REUSABLE ARTIFACTS:
+  - Data quality report (Stage 0)
+  - Dependence structure / M_eff estimate (Stage 1)
+  - Signal decay curves (Stage 2)
+  - Gate contracts (Stage 3)
+  These feed into future research tracks and should be versioned.
+
+Archive the complete track: data partitions, gate contracts,
+all diagnostic visuals, all decisions, all code.
+The archive must be sufficient for a third party to reproduce
+every gate decision from raw data.
+```
+
+---
+
+## Appendix A: Gate Contract Template
+
+```yaml
+gate:
+  id: "{TRACK_ID}_{GATE_NAME}"
+  stage: "{discovery | confirmation | replication | cross_replication}"
+  version: 1
+  created: "{ISO_DATE}"
+  frozen: true
+
+data:
+  partition: "{train | holdout | live}"
+  date_range: ["{start}", "{end}"]
+  universe: "{IG | HY | EM | ...}"
+  min_cross_section: {N_min}
+
+test:
+  estimator: "spearman_ic"
+  null_hypothesis: "rho_s <= {FLOOR}"
+  alternative: "rho_s > {FLOOR}"
+  sidedness: "one-sided"
+  method: "stationary_block_bootstrap"
+  block_length: {BLOCK_LEN}
+  n_bootstrap: {N_BOOT}
+
+multiplicity:
+  n_candidates: {|C|}
+  m_effective: {M_eff}
+  rdf_multiplier: {RDF_MULT}
+  method: "{BH | BY | Holm | Meff-Bonferroni}"
+  target_rate: {FDR or FWER target}
+  rate_type: "{FDR | FWER}"
+
+decisions:
+  reject_action: "{proceed_to_next_gate | deploy | ...}"
+  fail_action: "{archive | flag_for_review | ...}"
+
+outputs:
+  rejection_set: []  # populated after execution
+  diagnostics: []    # paths to visual artifacts
+  hash: ""           # SHA-256 of this contract before execution
+```
+
+## Appendix B: Visualisation Priority Ranking
+
+For each stage, the single most important visual:
+
+| Stage | Primary Visual | What It Answers |
+|-------|---------------|-----------------|
+| 0. Data audit | Missingness heatmap (clustered) | Is the data's absence structure informative? |
+| 1. Pre-EDA | Signal dependence clustermap + scree | How many independent things am I actually testing? |
+| 2. Discovery | Quantile spread return heatmap | Is the signal monotonic and stable over time? |
+| 3. Confirmation | Train vs holdout quantile heatmap (side-by-side) | Does the pattern survive out-of-sample? |
+| 4. Replication | IC time series with OBF spending boundaries | Is the signal persisting in live data? |
+| 5. Cross-replication | Posterior density with prior overlay | How much did the new universe update our belief? |
+| 6. Post-mortem | Funnel plot: all |S| raw p-values vs effect size | Publication bias check — does the funnel look symmetric? |
+
+## Appendix C: Automation Checklist
+
+Before declaring the pipeline automatable, verify each criterion:
+
+```
+[ ] Every gate has a YAML contract frozen before execution
+[ ] Data partitions are enforced architecturally (not by convention)
+[ ] The candidate set C is hashed and immutable after discovery
+[ ] The multiplicity method is specified before seeing holdout data
+[ ] The replication spending function is specified before live monitoring begins
+[ ] Every gate produces: (1) a decision, (2) diagnostics, (3) a hash
+[ ] No gate's decision depends on human interpretation of a visual
+[ ] Visuals are attached to gates as artifacts, not used for decisions
+[ ] The full pipeline is reproducible from raw data + gate contracts
+[ ] All code is versioned alongside the gate contracts
+```
