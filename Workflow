@@ -1,0 +1,115 @@
+These are the three things that separate a real research pipeline from a p-hacking machine with extra steps. They're also deeply interconnected — the exploratory gate is what *generates* the multiplicity problem, and the replication gate is what *audits* whether you solved it.
+
+## 1. The Exploratory Gate
+
+The problem: you need a stage where you *don't know* the hypothesis yet, but you also can't let it contaminate the confirmatory stage. The solution is to make the exploration formally bounded and to enforce a data firewall.
+
+Structure it as a **discovery gate** that sits upstream of the confirmatory gate:
+
+```
+GATE: discover_carry_signals
+  data_partition:  train_only (strict temporal cutoff, no leakage)
+  search_space:    {OAS, Z-spread, G-spread} × {1d, 5d, 21d} × {raw, z-scored, rank}
+  screening_stat:  |spearman_ic| across cross-sections
+  screening_rule:  retain signals where median |IC| > 0.03 across 12 rolling quarters
+  output:          candidate_set C ⊂ search_space, |C| recorded
+  freeze:          C is immutable once gate closes; |C| feeds into multiplicity adjustment
+```
+
+The critical design choices:
+
+- **The data partition is physical, not notional.** The exploratory gate literally cannot access holdout data. In code, this means the holdout parquet files aren't on the path, or they're encrypted with a key that's only released when the confirmatory gate triggers. Trust nothing to discipline; enforce it architecturally.
+- **The search space is pre-registered.** You're allowed to explore *within* it freely, but the space itself is fixed. This bounds the implicit multiplicity. If you later want to add a signal that wasn't in the search space, that's a new research track, not an extension of this one.
+- **The screening rule is deliberately loose.** You *want* high recall at this stage; false positives get caught downstream. The exploratory gate's job is to reduce the candidate set from combinatorially large to manageable, not to certify anything.
+
+## 2. Multiplicity Awareness
+
+The exploratory gate hands you |C| candidates. Now you're testing |C| hypotheses on the holdout, and you need the family-wise or false discovery rate controlled.
+
+The right choice depends on what you're optimizing:
+
+**If you need *any one* signal to be real (portfolio construction with a single best signal):** control the family-wise error rate (FWER). Holm-Bonferroni is the default — it's uniformly more powerful than Bonferroni and is valid under arbitrary dependence.
+
+**If you're building a composite signal and can tolerate some duds:** control the FDR. Benjamini-Hochberg is the standard, but it assumes independence or positive dependence (PRDS). For cross-sectional credit signals, dependence is the norm — correlated signals measured on the same bonds in the same macro environment. You need **Benjamini-Yekutieli**, which is valid under arbitrary dependence, or better yet, the **knockoff filter** if you can construct valid knockoffs for your signal matrix.
+
+The gate contract becomes:
+
+```
+GATE: confirm_carry_signals
+  data_partition:  holdout_only
+  candidates:      C from discover gate (|C| = k, immutable)
+  per_signal_test: one-sided block bootstrap, H₀: ρ_s ≤ 0.02
+  multiplicity:    BH at FDR ≤ 0.05 (if PRDS holds) | BY at FDR ≤ 0.05 (otherwise)
+  diagnostics:     record raw p-values, adjusted p-values, rejection set R ⊂ C
+  action:          only signals in R proceed to portfolio backtest
+```
+
+A subtlety that matters enormously: **the effective number of tests isn't |C|, it's the number of *independent* tests.** If three of your carry variants are correlated at ρ > 0.9, they're essentially one test. You can estimate the effective number via eigenvalue decomposition of the signal correlation matrix (the Meff approach of Li & Ji, or the Galwey method). This gives you tighter multiplicity adjustment without cheating — you're accounting for the actual dimensionality of your search, not the nominal count.
+
+One more layer: **account for the exploration you did but didn't formalize.** If you looked at 50 scatter plots before deciding to focus on carry, that's implicit multiplicity. The honest approach is to either inflate |C| with a "researcher degrees of freedom" buffer (Romano & Wolf suggest 2-3× in practice), or to use a **split-sample** approach where even the exploratory gate uses only half the training data, and the other half serves as a pilot confirmatory check before the real holdout.
+
+## 3. Replication Awareness
+
+This is the hardest one to automate because replication has a temporal dimension — you need *new* data that didn't exist when the hypothesis was formulated. Three mechanisms, in increasing order of rigor:
+
+**A. Temporal out-of-sample accumulation.** After the confirmatory gate passes, the signal goes live (or into paper trading). You define a **replication gate** that triggers after N months of fresh data:
+
+```
+GATE: replicate_carry_signal
+  trigger:         calendar_months_since_confirmation ≥ 6
+  data:            post_confirmation_only
+  test:            same estimator, same null, same test as confirmatory gate
+  multiplicity:    none (single pre-registered hypothesis)
+  reject_if:       p < 0.05 (can be less stringent than confirmation)
+  action_on_fail:  downweight signal in portfolio, trigger review
+  recurrence:      re-evaluate every 6 months (sequential monitoring)
+```
+
+The key insight: the replication gate tests the *same* hypothesis on *genuinely new* data, so there's no multiplicity adjustment needed. It's a single test. This is enormously powerful — it's why pre-registration + temporal holdout is the gold standard.
+
+**B. Sequential monitoring with spending functions.** Rather than a one-shot replication test after 6 months, you can monitor the signal continuously using an **alpha spending function** (Lan-DeMets). This lets you peek at the data at pre-specified calendar times without inflating your type-I error:
+
+```
+GATE: sequential_replicate
+  monitoring_times:  [3mo, 6mo, 12mo, 24mo]
+  spending_function: O'Brien-Fleming  # very conservative early, liberal late
+  total_alpha:       0.05
+  early_stop_for_futility: conditional power < 0.20 → archive signal
+```
+
+O'Brien-Fleming is ideal here because it spends almost no alpha early (so a signal that's genuinely decaying doesn't get prematurely confirmed) and concentrates power at the final look.
+
+**C. Cross-asset or cross-universe replication.** If carry works in IG, does it work in HY? In EM sovereign? This is a *different kind* of replication — it tests generalizability rather than persistence. Model it as a separate discovery → confirmation pipeline on the new universe, but with a **prior informed by the original result** (empirical Bayes or a formal Bayesian updating step). The automation looks like:
+
+```
+GATE: cross_replicate_carry
+  source_result:     IC_IG = 0.08, p = 0.003
+  target_universe:   HY
+  prior:             N(0.08, σ²_shrunk)  # skeptical shrinkage toward zero
+  test:              Bayesian one-sided, BF₁₀ > 3 to confirm
+  action:            if confirmed, pool signals; if not, flag universe-specificity
+```
+
+## How These Three Compose
+
+The full DAG looks like:
+
+```
+[Pre-register search space]
+        ↓
+[EXPLORE on train split] → candidate set C, |C| = k
+        ↓
+[CONFIRM on holdout, multiplicity-adjusted] → rejection set R ⊂ C
+        ↓
+[DEPLOY signal, begin monitoring]
+        ↓
+[REPLICATE via sequential monitoring on new data]
+        ↓                          ↓
+   pass → maintain signal     fail → decay/archive
+        ↓
+[CROSS-REPLICATE on adjacent universes] (optional, parallel track)
+```
+
+Each gate is a pure function of data and pre-specified parameters. The DAG is the automation. The discipline is that every arrow is a data firewall — downstream nodes cannot reach back and modify upstream decisions. Once the exploratory gate closes, C is frozen. Once the confirmatory gate closes, R is frozen. The replication gate can only *remove* signals from production, never *add* new ones without restarting the pipeline from exploration.
+
+The fundamental principle: **exploration is free, confirmation is expensive, replication is the audit.** Structure the automation so that the cheap stage is generous, the expensive stage is rigorous, and the audit stage is continuous.
