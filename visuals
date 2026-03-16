@@ -1,0 +1,83 @@
+This is where the real craft lives. The gates are mechanical by design — the EDA is where you build the intuition that makes the gates worth running.
+
+## Pre-Exploratory EDA (before you even define the search space)
+
+The goal here is to understand the **geometry of the data** before you form any hypotheses. You're characterizing the raw materials, not testing anything.
+
+**A. Marginal structure of candidate signals.**
+
+The single most informative pre-exploration visual is a **quantile-quantile plot of each candidate signal against Gaussian**, faceted by time period. This tells you three things at once: tail heaviness (convex departure in tails → fat tails), discreteness or clumping (staircase patterns → stale quotes or liquidity artifacts), and non-stationarity (if the QQ shape changes across periods, the signal's distribution is drifting).
+
+For credit specifically, you'll almost always see heavy right tails in OAS and Z-spread — that's the default/distress asymmetry. The QQ plot tells you *how* heavy, which directly informs your choice of rank-based vs moment-based tests downstream. If the QQ plot screams "not Gaussian," you've already justified the Spearman IC choice over Pearson, and you've documented *why* before touching the hypothesis.
+
+**B. Cross-sectional coverage and missingness heatmap.**
+
+A **bond × date heatmap** where color encodes missingness pattern. Not just "% missing" — the *structure* of missingness matters. Block missingness (whole issuers disappearing for weeks) is informative and dangerous: it correlates with liquidity events, which correlate with returns. Random missingness is benign. The visual should make block patterns jump out immediately.
+
+Best implementation: order the y-axis (bonds) by hierarchical clustering on the missingness *pattern*, not alphabetically. Bonds with similar missingness profiles cluster together, and you'll see issuer/sector/rating structure emerge without ever looking at returns.
+
+**C. Signal persistence heatmap.**
+
+A **lag × signal heatmap** showing the autocorrelation of each signal cross-sectionally at lags 1d, 5d, 21d, 63d. This is the single most important diagnostic for signal construction: a signal with near-zero 1d autocorrelation is noisy and needs smoothing; a signal with autocorrelation still at 0.95 at 21d is so persistent that the 5d and 21d horizons are essentially the same bet.
+
+The visual should be a grid: rows are signals, columns are lags, color is rank autocorrelation. This immediately reveals which signals are redundant (similar persistence profiles → likely correlated → inflated effective multiplicity) and which horizons are actually distinct.
+
+**D. The dependence structure diagnostic — this is the most underrated one.**
+
+A **signal correlation matrix** visualized as a clustermap with dendrogram. But not the Pearson correlation of raw signals — the **Spearman correlation of cross-sectional signal ranks**, averaged over time. This tells you the effective dimensionality of your search space. If your 27-element search space (3 spreads × 3 horizons × 3 transforms) has only 4–5 eigenvalues above noise, your effective multiplicity is 4–5, not 27. The clustermap makes this visually obvious: tight clusters of near-identical signals that should be treated as one test.
+
+## Post-Exploratory / Pre-Confirmatory EDA (after the discovery gate, before the holdout)
+
+The goal here is to stress-test the candidate set C *using only training data*. You're asking: "are these candidates robust, or are they artifacts of the particular training sample?"
+
+**E. The IC time series with rolling confidence band.**
+
+For each candidate signal in C, plot the **rolling cross-sectional Spearman IC** (e.g., 63d rolling window) as a time series, with a ±2σ bootstrap confidence band around zero. This is the single best visual for signal quality. What you're looking for:
+
+- Sustained periods above the band → genuine predictability
+- Brief spikes followed by mean-reversion to zero → likely spurious, driven by a single event
+- Persistent time below zero → the signal has regimes where it's *wrong*, which matters for portfolio construction even if the overall IC is positive
+
+Overlay key macro events (rate hikes, spread blow-outs, Covid, SVB) as vertical lines. If the IC is entirely driven by one regime, you know the confirmation test will be fragile.
+
+**F. Quantile spread return plot — the best single chart for signal strength.**
+
+Sort the cross-section into quintiles (or deciles) by signal strength each period. Plot the **average forward return of each quantile as a bar chart**, with error bars from the time series standard error. This is superior to a single IC number because it shows *monotonicity*. A signal can have positive IC but non-monotonic quantile returns (e.g., Q1 and Q5 both outperform Q3), which means the linear model implicit in IC is wrong, and the signal is actually capturing something nonlinear.
+
+The best version of this: a **heatmap of quantile × time period**, where color is the quantile's excess return. This shows both the average pattern (monotonicity) and its stability over time. A signal with beautiful average monotonicity but wild time-variation is much weaker than one with modest but stable monotonicity.
+
+**G. Signal decay curve.**
+
+Plot the IC (or quantile spread) as a function of the **forward horizon**: 1d, 2d, 5d, 10d, 21d, 63d. The shape of this curve is deeply informative:
+
+- Sharp peak at short horizon, rapid decay → high-frequency alpha, execution-sensitive
+- Slow rise, peak at 21d, slow decay → fundamental signal, robust to execution
+- Monotonically increasing → you're probably capturing risk, not alpha (beta loading masquerading as a signal)
+
+The decay curve also tells you the **natural holding period** of the signal, which directly feeds into portfolio construction.
+
+## Post-Confirmatory EDA (after the holdout gate, before deployment)
+
+Now you've rejected the null on the holdout. The goal shifts: you're no longer asking "is this real?" but "how does it behave in production conditions?"
+
+**H. Conditional calibration plot.**
+
+Bin the signal into deciles. For each decile, plot the **realized hit rate** (fraction of times forward return has the predicted sign) against the **predicted hit rate** (from a logistic calibration on the training set). Perfect calibration is the 45° line. This tells you whether the signal's *confidence* is well-calibrated, not just whether it's directionally correct on average.
+
+Overconfident signals (realized < predicted in extreme deciles) need shrinkage before deployment. Underconfident signals (realized > predicted) are leaving money on the table in position sizing.
+
+**I. The drawdown anatomy plot — most useful for portfolio-level deployment decisions.**
+
+Take the cumulative long-short return of the signal (Q5 − Q1) and plot it as a cumulative curve. Then overlay a **drawdown duration × depth scatter** beneath it: each drawdown episode is a point with x = duration in days, y = depth in bps. This separates "many small drawdowns" (normal, tolerable) from "one catastrophic drawdown" (regime-specific, dangerous). Two signals with identical Sharpe can have radically different drawdown anatomies.
+
+**J. Replication readiness diagnostic — the bridge to the replication gate.**
+
+A **time-split stability chart**: divide the holdout into 2–3 sub-periods, re-run the full test on each, plot the IC and p-value for each sub-period as points with confidence intervals. If the signal passes the overall holdout test but fails badly in one sub-period, you know the replication gate is likely to be volatile. This sets expectations for the sequential monitoring stage and informs the choice of spending function.
+
+## The Single Best Visualization
+
+If forced to pick one: the **quantile spread return heatmap** (quantile × time on axes, excess return as color, with a marginal bar chart on the right showing the time-average per quantile). It simultaneously encodes signal strength (color intensity), monotonicity (gradient across quantiles), stability (color consistency across time), and regime-dependence (color shifts in specific periods). It's the most information per pixel of any signal diagnostic, and it's the first thing any experienced quant researcher will look at.
+
+The reason it's superior to an IC time series: IC is a single summary statistic that compresses the entire cross-sectional distribution into one number. The quantile heatmap preserves the distributional structure. A signal where Q5 is spectacular but Q1–Q4 are indistinguishable looks identical to a signal with perfect monotonicity when you only see the IC. The heatmap distinguishes them instantly.
+
+For automation purposes, all of these can be generated as gate artifacts — each EDA visual is produced by a deterministic function of the data and the gate parameters, attached to the gate's output, and versioned alongside the hypothesis. The EDA doesn't make the decision; the gate does. But the EDA gives you (and any future auditor) the context to understand *why* the gate fired the way it did.
